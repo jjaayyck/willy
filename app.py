@@ -3,6 +3,7 @@ import os
 import openpyxl
 import json
 import re
+import time
 from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
@@ -10,13 +11,13 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
-# --- 核心邏輯：擷取 Excel 數據 (略作修改以適應 Streamlit 上傳對象) ---
+# --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
     # Streamlit 上傳的檔案是 BytesIO 物件
     wb = openpyxl.load_workbook(uploaded_file, data_only=True)
     ws = wb.active
     
-    # 版型判定 [cite: 14]
+    # 版型判定
     count_a = sum(1 for r in range(3, 15) if ws.cell(row=r, column=1).value)
     count_b = sum(1 for r in range(3, 15) if ws.cell(row=r, column=2).value)
     is_5_slot = count_b >= count_a * 1.2
@@ -40,15 +41,15 @@ def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
                 all_scored_items.append({"name": str(p_name), "score": float(score_val)})
             except: continue
 
-    # 階層式篩選 [cite: 16]
+    # 階層式篩選
     tier_1 = [item['name'] for item in all_scored_items if item['score'] < threshold_low]
     if tier_1:
         return user_info, tier_1, "極低分 (<30)"
-    else:
-        tier_2 = [item['name'] for item in all_scored_items if item['score'] < threshold_std]
-        return user_info, tier_2, "標準篩選 (<37)"
+    
+    tier_2 = [item['name'] for item in all_scored_items if item['score'] < threshold_std]
+    return user_info, tier_2, "標準篩選 (<37)"
 
-# --- 格式化工具 [cite: 26, 30, 31] ---
+# --- 2. 格式化工具 ---
 def format_output(content):
     if isinstance(content, list):
         lines = []
@@ -61,101 +62,93 @@ def format_output(content):
         return "\n".join(lines)
     return str(content).strip()
 
-# --- Streamlit 網頁介面 ---
-st.set_page_config(page_title="AI 細胞解碼報告生成器", layout="centered")
+# --- 3. Streamlit 網頁介面 ---
+st.set_page_config(page_title="AI 營養報告生成器", layout="wide")
 st.title("🧬 AI 細胞解碼報告生成器")
-st.write("上傳 Excel 檔案，自動生成結構化專業分析報告。")
 
-# 側邊欄配置
 with st.sidebar:
-    st.header("⚙️ 設定")
-    api_key = st.text_input("輸入 Gemini API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
-    lang = st.selectbox("報告語言", ["繁體中文", "English", "日本語"], index=0)
-    word_limit = st.slider("字數限制", 300, 1500, 800)
-    
-# 上傳區
-uploaded_file = st.file_uploader("選擇 Excel 檔案 (.xlsx)", type=["xlsx"])
-prompt_file = st.file_uploader("上傳系統提示詞檔案 (.txt)", type=["txt"])
+    st.header("⚙️ 參數設定")
+    # API Key 優先讀取 Secrets，若無則顯示輸入框
+    api_key_val = os.getenv("GEMINI_API_KEY", "")
+    api_key = st.text_input("Gemini API Key", type="password", value=api_key_val)
+    lang = st.selectbox("輸出語言", ["繁體中文", "English", "日本語"], index=0)
+    word_limit = st.number_input("字數限制", value=800)
 
-if st.button("🚀 開始分析") and uploaded_file and prompt_file and api_key:
-    try:
-        client = genai.Client(api_key=api_key)
-        bg_prompt = prompt_file.read().decode("utf-8")
-        
-        with st.spinner("正在逐項分析中，請稍候..."):
-            user_info, items, mode = extract_data_from_upload(uploaded_file)
+# 【修改點 1】：移除提示詞上傳區，僅保留 Excel 上傳
+up_excel = st.file_uploader("上傳 Excel 檔案", type=["xlsx"])
+
+# 【修改點 2】：設定固定的提示詞檔名 (請確保 GitHub 上的檔名與此完全一致)
+PROMPT_FILE_NAME = "系統提示詞_v3.1_純文字.txt"
+
+if st.button("🚀 開始分析報告") and up_excel and api_key:
+    # 檢查提示詞檔案是否存在
+    if not os.path.exists(PROMPT_FILE_NAME):
+        st.error(f"❌ 找不到設定檔：{PROMPT_FILE_NAME}。請確認檔案已上傳至 GitHub。")
+    else:
+        try:
+            client = genai.Client(api_key=api_key)
             
-            # --- 檢查 Excel 數值是否抓取失敗 ---
-            if items is None or (len(items) == 0 and mode != "無符合項目"):
-                st.error("❌ 偵測不到分數。請確認 Excel 已在您的電腦『存檔』過，以確保公式數值已寫入檔案。")
-            elif not items:
-                st.warning("該檔案中無符合篩選條件的低分項目。")
-            else:
-                st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
+            # 【修改點 3】：自動讀取本地檔案中的提示詞
+            with open(PROMPT_FILE_NAME, "r", encoding="utf-8") as f:
+                bg_prompt = f.read()
+            
+            with st.spinner("正在逐項分析中，請稍候..."):
+                user_info, items, mode = extract_data_from_upload(up_excel)
                 
-                final_text = ""
-                progress_bar = st.progress(0)
+                if not items:
+                    st.warning("該檔案中無符合篩選條件的低分項目。")
+                else:
+                    st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
+                    
+                    final_text = ""
+                    progress_bar = st.progress(0)
 
-                # --- 修改點：將 AI 呼叫移入迴圈內 ---
-                for index, item in enumerate(items):
-                    st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
-                    
-                    pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
-                    
-                    user_instruction = f"""
-                    受試者：{user_info.get('gender')}/{user_info.get('age')}歲。使用【{lang}】。
-                    分析項目：{item}。字數控制在 {word_limit} 字以內。
-                    【追蹤項目】：僅限挑選：[{pdf_tests}]。
-                    請嚴格以 JSON 回傳該項目的分析（不要包含其他文字）：
-                    {{
-                      "maintenance": "內容...",
-                      "tracking": "內容...",
-                      "nutrition": "內容...",
-                      "supplements": "內容...",
-                      "lifestyle": "內容..."
-                    }}
-                    """
-                    
-                    # 執行 AI 呼叫 (確保每次迴圈都跑一次)
-                    response = client.models.generate_content(
-                        model="models/gemma-3-12b-it", 
-                        contents=f"{bg_prompt}\n\n{user_instruction}",
-                        config={"temperature": 0.1}
-                    )
-                    
-                    # 解析該項目的 JSON
-                    json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                    if json_match:
-                        report = json.loads(json_match.group(0))
+                    # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
+                    for index, item in enumerate(items):
+                        st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                         
-                        # 格式化輸出
-                        section = f"您的檢測結果【{item}】預防評分為低分。\n\n"
-                        section += f"■ 細胞維護：\n{format_output(report.get('maintenance'))}\n\n"
-                        section += f"■ 主要追蹤項目：\n{format_output(report.get('tracking'))}\n\n"
-                        section += f"■ 細胞營養：\n{format_output(report.get('nutrition'))}\n\n"
-                        section += f"■ 功能性營養群建議：\n{format_output(report.get('supplements'))}\n\n"
-                        section += f"■ 生活策略小提醒：\n{format_output(report.get('lifestyle'))}\n\n"
-                        final_text += section + "="*50 + "\n\n"
-                    
-                    # 進度更新與間隔避免 API 被鎖
-                    progress_bar.progress((index + 1) / len(items))
-                    if len(items) > 1:
-                        import time
-                        time.sleep(5) 
+                        pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
+                        
+                        user_instruction = f"""
+                        受試者：{user_info.get('gender')}/{user_info.get('age')}歲。使用【{lang}】。
+                        分析項目：{item}。字數限制：{word_limit}。
+                        【追蹤項目】：僅限：[{pdf_tests}]。
+                        請嚴格回傳 JSON：
+                        {{
+                          "maintenance": "內容...",
+                          "tracking": "內容...",
+                          "nutrition": "內容...",
+                          "supplements": "內容...",
+                          "lifestyle": "內容..."
+                        }}
+                        """
+                        
+                        response = client.models.generate_content(
+                            model="models/gemma-3-12b-it", 
+                            contents=f"{bg_prompt}\n\n{user_instruction}",
+                            config={"temperature": 0.1}
+                        )
+                        
+                        # 解析 JSON
+                        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                        if json_match:
+                            report = json.loads(json_match.group(0))
+                            
+                            section = f"您的檢測結果【{item}】預防評分為低分。\n\n"
+                            section += f"■ 細胞維護：\n{format_output(report.get('maintenance'))}\n\n"
+                            section += f"■ 主要追蹤項目：\n{format_output(report.get('tracking'))}\n\n"
+                            section += f"■ 細胞營養：\n{format_output(report.get('nutrition'))}\n\n"
+                            section += f"■ 功能性營養群建議：\n{format_output(report.get('supplements'))}\n\n"
+                            section += f"■ 生活策略小提醒：\n{format_output(report.get('lifestyle'))}\n\n"
+                            final_text += section + "="*50 + "\n\n"
+                        
+                        progress_bar.progress((index + 1) / len(items))
+                        if len(items) > 1:
+                            time.sleep(5) # 避免頻率限制
 
-                st.success("🎉 全部項目分析完成！")
-                st.text_area("預覽結果", final_text, height=400)
-                
-                st.download_button(
-                    label="📥 下載完整文字報告 (.txt)",
-                    data=final_text,
-                    file_name=f"{uploaded_file.name.split('.')[0]}_分析報告.txt",
-                    mime="text/plain"
-                )
-                
-    except Exception as e:
-        st.error(f"分析過程中發生錯誤：{e}")
-else:
-    if not (uploaded_file and prompt_file and api_key):
-        st.info("請上傳檔案並確保設定已完成，然後點擊「開始分析」。")
+                    st.success("🎉 分析完成！")
+                    st.text_area("結果預覽", final_text, height=400)
+                    st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
 
+        except Exception as e:
+            st.error(f"分析失敗：{e}")
