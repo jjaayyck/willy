@@ -109,17 +109,24 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         
                         pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                         
+                        # 強化語言要求，確保 AI 看到
                         user_instruction = f"""
-                        受試者：{user_info.get('gender')}/{user_info.get('age')}歲。使用【{lang}】。
-                        分析項目：{item}。字數限制：{word_limit}。
-                        【追蹤項目】：僅限：[{pdf_tests}]。
-                        請嚴格回傳 JSON：
+                        ### IMPORTANT LANGUAGE REQUIREMENT: 
+                        All content in the JSON response MUST be written in {lang}. 
+                        (目前的語言要求：{lang})
+
+                        受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                        分析項目：{item}。
+                        字數限制：{word_limit} 字。
+                        【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                        
+                        請嚴格回傳 JSON 格式：
                         {{
-                          "maintenance": "內容...",
-                          "tracking": "內容...",
-                          "nutrition": "內容...",
-                          "supplements": "內容...",
-                          "lifestyle": "內容..."
+                          "maintenance": "...",
+                          "tracking": "...",
+                          "nutrition": "...",
+                          "supplements": "...",
+                          "lifestyle": "..."
                         }}
                         """
                         
@@ -152,3 +159,4 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
+
