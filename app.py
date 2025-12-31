@@ -115,16 +115,35 @@ if st.button("🚀 開始分析") and uploaded_file and prompt_file and api_key:
                 report = json.loads(json_match.group(0)) if json_match else json.loads(response.text)
                 
                 # 後製排版並顯示結果 [cite: 25, 31]
+                # --- 強大容錯版的後製排版  ---
                 final_text = ""
-                for item_name, data in report.items():
-                    section = f"您的檢測結果【{item_name}】預防評分為低分。\n\n"
+                
+                # 判定 AI 是否直接回傳內容 (跳過了項目名稱層級)
+                is_direct = any(k in report for k in ["maintenance", "nutrition", "lifestyle"])
+
+                if is_direct:
+                    # 處理直接結構 (例如：{"maintenance": "...", ...})
+                    display_name = items[0] if items else "檢測項目"
+                    data = report
+                    section = f"您的檢測結果【{display_name}】預防評分為低分。\n\n"
                     section += f"■ 細胞維護：\n{format_output(data.get('maintenance'))}\n\n"
                     section += f"■ 主要追蹤項目：\n{format_output(data.get('tracking'))}\n\n"
                     section += f"■ 細胞營養：\n{format_output(data.get('nutrition'))}\n\n"
                     section += f"■ 功能性營養群建議：\n{format_output(data.get('supplements'))}\n\n"
                     section += f"■ 生活策略小提醒：\n{format_output(data.get('lifestyle'))}\n\n"
-                    section += "="*50 + "\n\n"
-                    final_text += section
+                    final_text = section
+                else:
+                    # 處理嵌套結構 (原本的邏輯)
+                    for item_name, data in report.items():
+                        if isinstance(data, dict):
+                            section = f"您的檢測結果【{item_name}】預防評分為低分。\n\n"
+                            section += f"■ 細胞維護：\n{format_output(data.get('maintenance'))}\n\n"
+                            section += f"■ 主要追蹤項目：\n{format_output(data.get('tracking'))}\n\n"
+                            section += f"■ 細胞營養：\n{format_output(data.get('nutrition'))}\n\n"
+                            section += f"■ 功能性營養群建議：\n{format_output(data.get('supplements'))}\n\n"
+                            section += f"■ 生活策略小提醒：\n{format_output(data.get('lifestyle'))}\n\n"
+                            section += "="*50 + "\n\n"
+                            final_text += section
                 
                 st.success("分析完成！")
                 st.text_area("預覽結果", final_text, height=400)
