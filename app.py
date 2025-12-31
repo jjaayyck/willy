@@ -11,6 +11,26 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
+def build_language_system_rule(lang: str) -> str:
+    return f"""
+# LANGUAGE CONSTRAINT — ABSOLUTE RULE (HIGHEST PRIORITY)
+
+The user has selected the output language: {lang}
+
+You MUST write the ENTIRE response strictly in this language.
+Any violation makes the response INVALID.
+
+- If lang is "English":
+  - Respond in English ONLY
+  - DO NOT output any Chinese characters (no 中文/漢字)
+- If lang is "繁體中文":
+  - Respond in Traditional Chinese ONLY
+- If lang is "日本語":
+  - すべて日本語で回答してください
+
+Return JSON ONLY. No extra text outside JSON.
+""".strip()
+
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
     # Streamlit 上傳的檔案是 BytesIO 物件
@@ -102,6 +122,33 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     
                     final_text = ""
                     progress_bar = st.progress(0)
+                    HEADERS = {
+                        "繁體中文": {
+                            "intro": "您的檢測結果【{item}】預防評分為低分。",
+                            "maintenance": "■ 細胞維護：",
+                            "tracking": "■ 主要追蹤項目：",
+                            "nutrition": "■ 細胞營養：",
+                            "supplements": "■ 功能性營養群建議：",
+                            "lifestyle": "■ 生活策略小提醒：",
+                        },
+                        "English": {
+                            "intro": "Your result for 【{item}】 is a low prevention score.",
+                            "maintenance": "■ Cellular maintenance:",
+                            "tracking": "■ Key tracking labs:",
+                            "nutrition": "■ Cellular nutrition:",
+                            "supplements": "■ Functional nutrients & supplements:",
+                            "lifestyle": "■ Lifestyle tips:",
+                        },
+                        "日本語": {
+                            "intro": "検査結果【{item}】は低スコアです。",
+                            "maintenance": "■ 細胞メンテナンス：",
+                            "tracking": "■ 追跡すべき検査項目：",
+                            "nutrition": "■ 細胞栄養：",
+                            "supplements": "■ 栄養補助（サプリ）提案：",
+                            "lifestyle": "■ 生活習慣のヒント：",
+                        },
+                    }
+                    H = HEADERS.get(lang, HEADERS["繁體中文"])
 
                     # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
                     for index, item in enumerate(items):
@@ -130,10 +177,42 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         }}
                         """
                         
+                        task_prompt = f"""
+                        # LANGUAGE CONSTRAINT (CRITICAL)
+                        - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
+                        - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
+                        - IF {lang} IS "日本語", すべて日本語で回答してください。
+
+                        # SUBJECT DATA
+                        - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                        - Target Item: {item}
+                        - Word Limit: {word_limit}
+
+                        # REFERENCE DATA (FOR TRACKING SECTION)
+                        - Valid Tracking Items: [{pdf_tests}]
+
+                        # RESPONSE FORMAT
+                        Please provide the analysis strictly in the following JSON structure:
+                        {{
+                        "maintenance": "...",
+                        "tracking": "...",
+                        "nutrition": "...",
+                        "supplements": "...",
+                        "lifestyle": "..."
+                        }}
+                        """
+
+                        # 2. 使用 system_instruction 分離角色與任務
+                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang)
+
                         response = client.models.generate_content(
-                            model="models/gemma-3-12b-it", 
-                            contents=f"{bg_prompt}\n\n{user_instruction}",
-                            config={"temperature": 0.1}
+                            model="models/gemma-3-12b-it",
+                            system_instruction=system_prompt,
+                            contents = user_instruction + "\n\n" + task_prompt,
+                            config={
+                                "temperature": 0.1,
+                                "top_p": 0.95,
+                            }
                         )
                         
                         # 解析 JSON
@@ -141,12 +220,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         if json_match:
                             report = json.loads(json_match.group(0))
                             
-                            section = f"您的檢測結果【{item}】預防評分為低分。\n\n"
-                            section += f"■ 細胞維護：\n{format_output(report.get('maintenance'))}\n\n"
-                            section += f"■ 主要追蹤項目：\n{format_output(report.get('tracking'))}\n\n"
-                            section += f"■ 細胞營養：\n{format_output(report.get('nutrition'))}\n\n"
-                            section += f"■ 功能性營養群建議：\n{format_output(report.get('supplements'))}\n\n"
-                            section += f"■ 生活策略小提醒：\n{format_output(report.get('lifestyle'))}\n\n"
+                            section = H["intro"].format(item=item) + "\n\n"
+                            section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
+                            section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
+                            section += f'{H["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
+                            section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
+                            section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
                             final_text += section + "="*50 + "\n\n"
                         
                         progress_bar.progress((index + 1) / len(items))
@@ -159,4 +238,3 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
-
