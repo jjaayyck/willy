@@ -82,77 +82,74 @@ if st.button("🚀 開始分析") and uploaded_file and prompt_file and api_key:
         client = genai.Client(api_key=api_key)
         bg_prompt = prompt_file.read().decode("utf-8")
         
-        with st.spinner("正在讀取數據與分析中..."):
+        with st.spinner("正在逐項分析中，請稍候..."):
             user_info, items, mode = extract_data_from_upload(uploaded_file)
             
-            if not items:
+            # --- 檢查 Excel 數值是否抓取失敗 ---
+            if items is None or (len(items) == 0 and mode != "無符合項目"):
+                st.error("❌ 偵測不到分數。請確認 Excel 已在您的電腦『存檔』過，以確保公式數值已寫入檔案。")
+            elif not items:
                 st.warning("該檔案中無符合篩選條件的低分項目。")
             else:
-                st.info(f"偵測模式：{mode}，受試者：{user_info.get('gender')}/{user_info.get('age')}歲")
+                st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
                 
-                # 準備 AI 指令 [cite: 23]
-                items_str = "、".join(items)
-                pdf_available_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
-                
-                user_instruction = f"""
-                受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。請使用【{lang}】回覆。
-                針對項目分析：{items_str}。總字數控制在 {word_limit} 字以內。
-                【追蹤項目約束】：僅限從清單挑選：[{pdf_available_tests}]。
-                請嚴格以 JSON 格式回傳，Key 包含 maintenance, tracking, nutrition, supplements, lifestyle。
-                """
-                
-                final_prompt = f"{bg_prompt}\n\n{user_instruction}"
-                
-                # 呼叫 AI (使用 gemma-3-12b-it) [cite: 17, 18]
-                response = client.models.generate_content(
-                    model="models/gemma-3-12b-it", 
-                    contents=final_prompt,
-                    config={"temperature": 0.1}
-                )
-                
-                # 解析 JSON [cite: 19]
-                json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                report = json.loads(json_match.group(0)) if json_match else json.loads(response.text)
-                
-                # 後製排版並顯示結果 [cite: 25, 31]
-                # --- 強大容錯版的後製排版  ---
                 final_text = ""
-                
-                # 判定 AI 是否直接回傳內容 (跳過了項目名稱層級)
-                is_direct = any(k in report for k in ["maintenance", "nutrition", "lifestyle"])
+                progress_bar = st.progress(0)
 
-                if is_direct:
-                    # 處理直接結構 (例如：{"maintenance": "...", ...})
-                    display_name = items[0] if items else "檢測項目"
-                    data = report
-                    section = f"您的檢測結果【{display_name}】預防評分為低分。\n\n"
-                    section += f"■ 細胞維護：\n{format_output(data.get('maintenance'))}\n\n"
-                    section += f"■ 主要追蹤項目：\n{format_output(data.get('tracking'))}\n\n"
-                    section += f"■ 細胞營養：\n{format_output(data.get('nutrition'))}\n\n"
-                    section += f"■ 功能性營養群建議：\n{format_output(data.get('supplements'))}\n\n"
-                    section += f"■ 生活策略小提醒：\n{format_output(data.get('lifestyle'))}\n\n"
-                    final_text = section
-                else:
-                    # 處理嵌套結構 (原本的邏輯)
-                    for item_name, data in report.items():
-                        if isinstance(data, dict):
-                            section = f"您的檢測結果【{item_name}】預防評分為低分。\n\n"
-                            section += f"■ 細胞維護：\n{format_output(data.get('maintenance'))}\n\n"
-                            section += f"■ 主要追蹤項目：\n{format_output(data.get('tracking'))}\n\n"
-                            section += f"■ 細胞營養：\n{format_output(data.get('nutrition'))}\n\n"
-                            section += f"■ 功能性營養群建議：\n{format_output(data.get('supplements'))}\n\n"
-                            section += f"■ 生活策略小提醒：\n{format_output(data.get('lifestyle'))}\n\n"
-                            section += "="*50 + "\n\n"
-                            final_text += section
-                
-                st.success("分析完成！")
+                # --- 修改點：將 AI 呼叫移入迴圈內 ---
+                for index, item in enumerate(items):
+                    st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
+                    
+                    pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
+                    
+                    user_instruction = f"""
+                    受試者：{user_info.get('gender')}/{user_info.get('age')}歲。使用【{lang}】。
+                    分析項目：{item}。字數控制在 {word_limit} 字以內。
+                    【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                    請嚴格以 JSON 回傳該項目的分析（不要包含其他文字）：
+                    {{
+                      "maintenance": "內容...",
+                      "tracking": "內容...",
+                      "nutrition": "內容...",
+                      "supplements": "內容...",
+                      "lifestyle": "內容..."
+                    }}
+                    """
+                    
+                    # 執行 AI 呼叫 (確保每次迴圈都跑一次)
+                    response = client.models.generate_content(
+                        model="models/gemma-3-12b-it", 
+                        contents=f"{bg_prompt}\n\n{user_instruction}",
+                        config={"temperature": 0.1}
+                    )
+                    
+                    # 解析該項目的 JSON
+                    json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                    if json_match:
+                        report = json.loads(json_match.group(0))
+                        
+                        # 格式化輸出
+                        section = f"您的檢測結果【{item}】預防評分為低分。\n\n"
+                        section += f"■ 細胞維護：\n{format_output(report.get('maintenance'))}\n\n"
+                        section += f"■ 主要追蹤項目：\n{format_output(report.get('tracking'))}\n\n"
+                        section += f"■ 細胞營養：\n{format_output(report.get('nutrition'))}\n\n"
+                        section += f"■ 功能性營養群建議：\n{format_output(report.get('supplements'))}\n\n"
+                        section += f"■ 生活策略小提醒：\n{format_output(report.get('lifestyle'))}\n\n"
+                        final_text += section + "="*50 + "\n\n"
+                    
+                    # 進度更新與間隔避免 API 被鎖
+                    progress_bar.progress((index + 1) / len(items))
+                    if len(items) > 1:
+                        import time
+                        time.sleep(5) 
+
+                st.success("🎉 全部項目分析完成！")
                 st.text_area("預覽結果", final_text, height=400)
                 
-                # 提供下載 [cite: 32]
                 st.download_button(
-                    label="📥 下載文字報告 (.txt)",
+                    label="📥 下載完整文字報告 (.txt)",
                     data=final_text,
-                    file_name=f"{uploaded_file.name.split('.')[0]}_報告.txt",
+                    file_name=f"{uploaded_file.name.split('.')[0]}_分析報告.txt",
                     mime="text/plain"
                 )
                 
@@ -161,3 +158,4 @@ if st.button("🚀 開始分析") and uploaded_file and prompt_file and api_key:
 else:
     if not (uploaded_file and prompt_file and api_key):
         st.info("請上傳檔案並確保設定已完成，然後點擊「開始分析」。")
+
