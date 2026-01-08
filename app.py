@@ -84,7 +84,7 @@ def format_output(content):
 
 # --- 3. Streamlit 網頁介面 ---
 st.set_page_config(page_title="AI 營養報告生成器", layout="wide")
-st.title("🧬 AI 細胞解碼報告生成器")
+st.title("🧬 印度AI 細胞解碼報告生成器")
 
 with st.sidebar:
     st.header("⚙️ 參數設定")
@@ -206,10 +206,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang)
 
                         response = client.models.generate_content(
-                            model="models/gemma-3-12b-it",
-                            system_instruction=system_prompt,
+                            model="models/gemma-3-27b-it",
                             contents = user_instruction + "\n\n" + task_prompt,
                             config={
+                                "system_instruction": system_prompt,
                                 "temperature": 0.1,
                                 "top_p": 0.95,
                             }
@@ -238,3 +238,4 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
+
