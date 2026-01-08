@@ -204,12 +204,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                         # 2. 使用 system_instruction 分離角色與任務
                         system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang)
-
+                        full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}"
                         response = client.models.generate_content(
                             model="models/gemma-3-27b-it",
-                            contents = user_instruction + "\n\n" + task_prompt,
+                            contents=full_combined_prompt,
                             config={
-                                "system_instruction": system_prompt,
                                 "temperature": 0.1,
                                 "top_p": 0.95,
                             }
@@ -238,4 +237,5 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
+
 
