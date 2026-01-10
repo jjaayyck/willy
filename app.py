@@ -209,7 +209,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             model="models/gemma-3-27b-it",
                             contents=full_combined_prompt,
                             config={
-                                "temperature": 0.1,
+                                "temperature": 0.3,
                                 "top_p": 0.95,
                             }
                         )
@@ -237,5 +237,6 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
+
 
 
