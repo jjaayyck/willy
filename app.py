@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
-def build_language_system_rule(lang: str) -> str:
+def build_language_system_rule(lang: str, word_limit: int) -> str:
     return f"""
 # LANGUAGE CONSTRAINT — ABSOLUTE RULE (HIGHEST PRIORITY)
 
@@ -19,6 +19,7 @@ The user has selected the output language: {lang}
 
 You MUST write the ENTIRE response strictly in this language.
 Any violation makes the response INVALID.
+You MUST keep the total output within {word_limit} characters/words for the JSON values.
 
 - If lang is "English":
   - Respond in English ONLY
@@ -30,6 +31,29 @@ Any violation makes the response INVALID.
 
 Return JSON ONLY. No extra text outside JSON.
 """.strip()
+
+def is_language_valid(text: str, lang: str) -> bool:
+    if lang == "English":
+        return not re.search(r"[\u4e00-\u9fff\u3040-\u30ff]", text)
+    if lang == "繁體中文":
+        return not re.search(r"[\u3040-\u30ff]", text)
+    if lang == "日本語":
+        return bool(re.search(r"[\u3040-\u30ff]", text))
+    return True
+
+def count_output_length(text: str, lang: str) -> int:
+    if lang == "English":
+        return len(re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?", text))
+    return len(re.findall(r"\S", text))
+
+def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str]:
+    combined_text = " ".join(str(v) for v in report.values())
+    if not is_language_valid(combined_text, lang):
+        return False, "語言不符合選擇"
+    length = count_output_length(combined_text, lang)
+    if length > word_limit:
+        return False, f"超過字數限制（{length}/{word_limit}）"
+    return True, ""
 
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
@@ -203,22 +227,38 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         """
 
                         # 2. 使用 system_instruction 分離角色與任務
-                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang)
+                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, word_limit)
                         full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}"
-                        response = client.models.generate_content(
-                            model="models/gemma-3-27b-it",
-                            contents=full_combined_prompt,
-                            config={
-                                "temperature": 0.3,
-                                "top_p": 0.95,
-                            }
-                        )
-                        
-                        # 解析 JSON
-                        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                        if json_match:
-                            report = json.loads(json_match.group(0))
-                            
+                        report = None
+                        failure_reason = ""
+                        for attempt in range(2):
+                            if attempt == 1:
+                                full_combined_prompt += (
+                                    f"\n\n# RETRY NOTICE\n"
+                                    f"The previous response was invalid: {failure_reason}.\n"
+                                    f"Please respond again strictly in {lang} and within the limit.\n"
+                                )
+                            response = client.models.generate_content(
+                                model="models/gemma-3-27b-it",
+                                contents=full_combined_prompt,
+                                config={
+                                    "temperature": 0.3,
+                                    "top_p": 0.95,
+                                }
+                            )
+
+                            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                            if not json_match:
+                                failure_reason = "未回傳有效 JSON"
+                                continue
+
+                            candidate_report = json.loads(json_match.group(0))
+                            valid, failure_reason = validate_report_output(candidate_report, lang, word_limit)
+                            if valid:
+                                report = candidate_report
+                                break
+
+                        if report:
                             section = H["intro"].format(item=item) + "\n\n"
                             section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
                             section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
@@ -226,6 +266,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
                             section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
                             final_text += section + "="*50 + "\n\n"
+                        else:
+                            st.warning(f"第 {index+1} 項分析失敗：{failure_reason}")
                         
                         progress_bar.progress((index + 1) / len(items))
                         if len(items) > 1:
