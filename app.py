@@ -19,7 +19,7 @@ The user has selected the output language: {lang}
 
 You MUST write the ENTIRE response strictly in this language.
 Any violation makes the response INVALID.
-You MUST keep the total output within {word_limit} characters/words for the JSON values.
+You MUST keep the total output within {word_limit} characters (non-space) for the JSON values.
 
 - If lang is "English":
   - Respond in English ONLY
@@ -50,10 +50,6 @@ def is_language_valid(text: str, lang: str) -> bool:
     return True
 
 def count_output_length(text: str, lang: str) -> int:
-    if lang == "English":
-        return len(re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?", text))
-    if lang == "Tiếng Việt":
-        return len(re.findall(r"[A-Za-z0-9À-ỹ]+(?:'[A-Za-z0-9À-ỹ]+)?", text))
     return len(re.findall(r"\S", text))
 
 def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str, int]:
@@ -244,7 +240,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                         受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                         分析項目：{item}。
-                        字數限制：{word_limit} 字（請先規劃字數，再產生內容）。
+                        字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                         生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                         各段落字數上限：{budget_hint}。
                         【追蹤項目】：僅限挑選：[{pdf_tests}]。
@@ -270,7 +266,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         # SUBJECT DATA
                         - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                         - Target Item: {item}
-                        - Word Limit (Hard Max): {word_limit}
+                        - Word Limit (Hard Max, non-space characters): {word_limit}
                         - Target Limit (Use This): {generation_limit}
                         - Section Budgets: {budget_hint}
 
@@ -315,7 +311,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                                 受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                                 分析項目：{item}。
-                                字數限制：{word_limit} 字（請先規劃字數，再產生內容）。
+                                字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                                 生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                                 各段落字數上限：{budget_hint}。
                                 【追蹤項目】：僅限挑選：[{pdf_tests}]。
@@ -340,7 +336,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 # SUBJECT DATA
                                 - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                                 - Target Item: {item}
-                                - Word Limit (Hard Max): {word_limit}
+                                - Word Limit (Hard Max, non-space characters): {word_limit}
                                 - Target Limit (Use This): {generation_limit}
                                 - Section Budgets: {budget_hint}
 
