@@ -285,10 +285,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         """
 
                         lifestyle_guidance = """
-                        # LIFESTYLE GUIDANCE (SMART, ACTIONABLE)
-                        Provide 3-5 actionable lifestyle tips tailored to the user's age/gender and the target item.
-                        Use specific habits, timing, or frequency (e.g., sleep schedule, activity cadence, hydration timing).
-                        Avoid generic advice; make it concrete and practical.
+                        # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
+                        Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
+                        Every tip must be measurable (frequency, duration, timing, or quantity).
+                        Ensure each tip is explicitly connected to the target topic's mechanism.
+                        Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
                         """
 
                         # 2. 使用 system_instruction 分離角色與任務
