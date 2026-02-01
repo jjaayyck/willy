@@ -52,10 +52,28 @@ def is_language_valid(text: str, lang: str) -> bool:
 def count_output_length(text: str, lang: str) -> int:
     return len(re.findall(r"\S", text))
 
+def normalize_report_value(value) -> str:
+    if isinstance(value, dict):
+        return " ".join(str(v) for v in value.values())
+    if isinstance(value, list):
+        return " ".join(str(v) for v in value)
+    return str(value)
+
+def min_section_length(word_limit: int) -> int:
+    return max(20, int(word_limit * 0.03))
+
 def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str, int]:
-    combined_text = " ".join(str(v) for v in report.values())
+    combined_text = " ".join(normalize_report_value(v) for v in report.values())
     if not is_language_valid(combined_text, lang):
         return False, "語言不符合選擇", count_output_length(combined_text, lang)
+    section_min = min_section_length(word_limit)
+    for key, value in report.items():
+        section_text = normalize_report_value(value).strip()
+        if not section_text:
+            return False, f"{key} 欄位內容為空", count_output_length(combined_text, lang)
+        section_length = count_output_length(section_text, lang)
+        if section_length < section_min:
+            return False, f"{key} 欄位內容過短", count_output_length(combined_text, lang)
     length = count_output_length(combined_text, lang)
     if length > word_limit:
         return False, f"超過字數限制（{length}/{word_limit}）", length
@@ -231,6 +249,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                         generation_limit = max(1, int(word_limit))
                         budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                        section_min = min_section_length(word_limit)
                         
                         # 強化語言要求，確保 AI 看到
                         user_instruction = f"""
@@ -243,6 +262,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                         生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                         各段落字數上限：{budget_hint}。
+                        各段落最少字數：{section_min} 字（非空白字元）。
                         【追蹤項目】：僅限挑選：[{pdf_tests}]。
                         
                         請嚴格回傳 JSON 格式：
@@ -269,6 +289,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         - Word Limit (Hard Max, non-space characters): {word_limit}
                         - Target Limit (Use This): {generation_limit}
                         - Section Budgets: {budget_hint}
+                        - Minimum Per Section: {section_min} (non-space characters)
 
                         # REFERENCE DATA (FOR TRACKING SECTION)
                         - Valid Tracking Items: [{pdf_tests}]
@@ -290,6 +311,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         Every tip must be measurable (frequency, duration, timing, or quantity).
                         Ensure each tip is explicitly connected to the target topic's mechanism.
                         Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
+                        Each section must contain enough detail to avoid empty headers.
                         """
 
                         # 2. 使用 system_instruction 分離角色與任務
@@ -304,6 +326,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                     shrink_by = max(10, output_length - word_limit)
                                     generation_limit = max(1, generation_limit - shrink_by)
                                 budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                                section_min = min_section_length(word_limit)
                                 system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
                                 user_instruction = f"""
                                 ### IMPORTANT LANGUAGE REQUIREMENT: 
@@ -315,6 +338,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                                 生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                                 各段落字數上限：{budget_hint}。
+                                各段落最少字數：{section_min} 字（非空白字元）。
                                 【追蹤項目】：僅限挑選：[{pdf_tests}]。
                                 
                                 請嚴格回傳 JSON 格式：
@@ -340,6 +364,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 - Word Limit (Hard Max, non-space characters): {word_limit}
                                 - Target Limit (Use This): {generation_limit}
                                 - Section Budgets: {budget_hint}
+                                - Minimum Per Section: {section_min} (non-space characters)
 
                                 # REFERENCE DATA (FOR TRACKING SECTION)
                                 - Valid Tracking Items: [{pdf_tests}]
