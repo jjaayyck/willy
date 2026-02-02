@@ -53,9 +53,15 @@ def count_output_length(text: str, lang: str) -> int:
     return len(re.findall(r"\S", text))
 
 def normalize_report_value(value) -> str:
+    if value is None:
+        return ""
     if isinstance(value, dict):
+        if not value:
+            return ""
         return " ".join(str(v) for v in value.values())
     if isinstance(value, list):
+        if not value:
+            return ""
         return " ".join(str(v) for v in value)
     return str(value)
 
@@ -67,8 +73,9 @@ def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bo
     if not is_language_valid(combined_text, lang):
         return False, "語言不符合選擇", count_output_length(combined_text, lang)
     section_min = min_section_length(word_limit)
-    for key, value in report.items():
-        section_text = normalize_report_value(value).strip()
+    required_keys = ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]
+    for key in required_keys:
+        section_text = normalize_report_value(report.get(key)).strip()
         if not section_text:
             return False, f"{key} 欄位內容為空", count_output_length(combined_text, lang)
         section_length = count_output_length(section_text, lang)
@@ -262,7 +269,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                         生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                         各段落字數上限：{budget_hint}。
-                        各段落最少字數：{section_min} 字（非空白字元）。
+                        各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
                         【追蹤項目】：僅限挑選：[{pdf_tests}]。
                         
                         請嚴格回傳 JSON 格式：
@@ -289,7 +296,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         - Word Limit (Hard Max, non-space characters): {word_limit}
                         - Target Limit (Use This): {generation_limit}
                         - Section Budgets: {budget_hint}
-                        - Minimum Per Section: {section_min} (non-space characters)
+                        - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
 
                         # REFERENCE DATA (FOR TRACKING SECTION)
                         - Valid Tracking Items: [{pdf_tests}]
@@ -311,7 +318,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         Every tip must be measurable (frequency, duration, timing, or quantity).
                         Ensure each tip is explicitly connected to the target topic's mechanism.
                         Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
-                        Each section must contain enough detail to avoid empty headers.
+                        Each section must include at least 2 sentences and avoid empty headers.
                         """
 
                         # 2. 使用 system_instruction 分離角色與任務
@@ -320,7 +327,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         report = None
                         failure_reason = ""
                         output_length = 0
-                        for attempt in range(2):
+                        for attempt in range(3):
                             if attempt == 1:
                                 if output_length > word_limit:
                                     shrink_by = max(10, output_length - word_limit)
@@ -338,7 +345,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                                 生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                                 各段落字數上限：{budget_hint}。
-                                各段落最少字數：{section_min} 字（非空白字元）。
+                                各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
                                 【追蹤項目】：僅限挑選：[{pdf_tests}]。
                                 
                                 請嚴格回傳 JSON 格式：
@@ -364,7 +371,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 - Word Limit (Hard Max, non-space characters): {word_limit}
                                 - Target Limit (Use This): {generation_limit}
                                 - Section Budgets: {budget_hint}
-                                - Minimum Per Section: {section_min} (non-space characters)
+                                - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
 
                                 # REFERENCE DATA (FOR TRACKING SECTION)
                                 - Valid Tracking Items: [{pdf_tests}]
