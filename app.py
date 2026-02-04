@@ -19,7 +19,7 @@ The user has selected the output language: {lang}
 
 You MUST write the ENTIRE response strictly in this language.
 Any violation makes the response INVALID.
-You MUST keep the total output within {word_limit} characters/words for the JSON values.
+You MUST keep the total output within {word_limit} characters (non-space) for the JSON values.
 
 - If lang is "English":
   - Respond in English ONLY
@@ -50,20 +50,69 @@ def is_language_valid(text: str, lang: str) -> bool:
     return True
 
 def count_output_length(text: str, lang: str) -> int:
-    if lang == "English":
-        return len(re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?", text))
-    if lang == "Tiếng Việt":
-        return len(re.findall(r"[A-Za-z0-9À-ỹ]+(?:'[A-Za-z0-9À-ỹ]+)?", text))
     return len(re.findall(r"\S", text))
 
-def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str]:
-    combined_text = " ".join(str(v) for v in report.values())
+def normalize_report_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        if not value:
+            return ""
+        return " ".join(str(v) for v in value.values())
+    if isinstance(value, list):
+        if not value:
+            return ""
+        return " ".join(str(v) for v in value)
+    return str(value)
+
+def min_section_length(word_limit: int) -> int:
+    return max(20, int(word_limit * 0.03))
+
+def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str, int]:
+    combined_text = " ".join(normalize_report_value(v) for v in report.values())
     if not is_language_valid(combined_text, lang):
-        return False, "語言不符合選擇"
+        return False, "語言不符合選擇", count_output_length(combined_text, lang)
+    section_min = min_section_length(word_limit)
+    required_keys = ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]
+    for key in required_keys:
+        section_text = normalize_report_value(report.get(key)).strip()
+        if not section_text:
+            return False, f"{key} 欄位內容為空", count_output_length(combined_text, lang)
+        section_length = count_output_length(section_text, lang)
+        if section_length < section_min:
+            return False, f"{key} 欄位內容過短", count_output_length(combined_text, lang)
     length = count_output_length(combined_text, lang)
     if length > word_limit:
-        return False, f"超過字數限制（{length}/{word_limit}）"
-    return True, ""
+        return False, f"超過字數限制（{length}/{word_limit}）", length
+    return True, "", length
+
+def build_length_budget(word_limit: int) -> dict:
+    weights = {
+        "maintenance": 0.2,
+        "tracking": 0.15,
+        "nutrition": 0.2,
+        "supplements": 0.2,
+        "lifestyle": 0.25,
+    }
+    remaining = word_limit
+    budget = {}
+    ordered_keys = list(weights.keys())
+    for key in ordered_keys[:-1]:
+        allocation = max(1, int(word_limit * weights[key]))
+        allocation = min(allocation, remaining)
+        budget[key] = allocation
+        remaining -= allocation
+    budget[ordered_keys[-1]] = max(1, remaining)
+    return budget
+
+def format_budget_hint(budget: dict) -> str:
+    return (
+        f'maintenance≤{budget["maintenance"]}, '
+        f'tracking≤{budget["tracking"]}, '
+        f'nutrition≤{budget["nutrition"]}, '
+        f'supplements≤{budget["supplements"]}, '
+        f'lifestyle≤{budget["lifestyle"]}'
+    )
 
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
@@ -205,6 +254,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                         
                         pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
+                        generation_limit = max(1, int(word_limit))
+                        budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                        section_min = min_section_length(word_limit)
                         
                         # 強化語言要求，確保 AI 看到
                         user_instruction = f"""
@@ -214,7 +266,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                         受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                         分析項目：{item}。
-                        字數限制：{word_limit} 字。
+                        字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
+                        生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
+                        各段落字數上限：{budget_hint}。
+                        各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
                         【追蹤項目】：僅限挑選：[{pdf_tests}]。
                         
                         請嚴格回傳 JSON 格式：
@@ -238,7 +293,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         # SUBJECT DATA
                         - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                         - Target Item: {item}
-                        - Word Limit: {word_limit}
+                        - Word Limit (Hard Max, non-space characters): {word_limit}
+                        - Target Limit (Use This): {generation_limit}
+                        - Section Budgets: {budget_hint}
+                        - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
 
                         # REFERENCE DATA (FOR TRACKING SECTION)
                         - Valid Tracking Items: [{pdf_tests}]
@@ -255,23 +313,84 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         """
 
                         lifestyle_guidance = """
-                        # LIFESTYLE GUIDANCE (SMART, ACTIONABLE)
-                        Provide 3-5 actionable lifestyle tips tailored to the user's age/gender and the target item.
-                        Use specific habits, timing, or frequency (e.g., sleep schedule, activity cadence, hydration timing).
-                        Avoid generic advice; make it concrete and practical.
+                        # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
+                        Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
+                        Every tip must be measurable (frequency, duration, timing, or quantity).
+                        Ensure each tip is explicitly connected to the target topic's mechanism.
+                        Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
+                        Each section must include at least 2 sentences and avoid empty headers.
                         """
 
                         # 2. 使用 system_instruction 分離角色與任務
-                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, word_limit)
+                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
                         full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
                         report = None
                         failure_reason = ""
-                        for attempt in range(2):
+                        output_length = 0
+                        for attempt in range(3):
                             if attempt == 1:
+                                if output_length > word_limit:
+                                    shrink_by = max(10, output_length - word_limit)
+                                    generation_limit = max(1, generation_limit - shrink_by)
+                                budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                                section_min = min_section_length(word_limit)
+                                system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
+                                user_instruction = f"""
+                                ### IMPORTANT LANGUAGE REQUIREMENT: 
+                                All content in the JSON response MUST be written in {lang}. 
+                                (目前的語言要求：{lang})
+
+                                受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                                分析項目：{item}。
+                                字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
+                                生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
+                                各段落字數上限：{budget_hint}。
+                                各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
+                                【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                                
+                                請嚴格回傳 JSON 格式：
+                                {{
+                                  "maintenance": "...",
+                                  "tracking": "...",
+                                  "nutrition": "...",
+                                  "supplements": "...",
+                                  "lifestyle": "..."
+                                }}
+                                """
+                                task_prompt = f"""
+                                # LANGUAGE CONSTRAINT (CRITICAL)
+                                - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
+                                - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
+                                - IF {lang} IS "日本語", すべて日本語で回答してください。
+                                - IF {lang} IS "한국어", 한국어로만 작성하세요.
+                                - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
+
+                                # SUBJECT DATA
+                                - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                                - Target Item: {item}
+                                - Word Limit (Hard Max, non-space characters): {word_limit}
+                                - Target Limit (Use This): {generation_limit}
+                                - Section Budgets: {budget_hint}
+                                - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
+
+                                # REFERENCE DATA (FOR TRACKING SECTION)
+                                - Valid Tracking Items: [{pdf_tests}]
+
+                                # RESPONSE FORMAT
+                                Please provide the analysis strictly in the following JSON structure:
+                                {{
+                                "maintenance": "...",
+                                "tracking": "...",
+                                "nutrition": "...",
+                                "supplements": "...",
+                                "lifestyle": "..."
+                                }}
+                                """
+                                full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
                                 full_combined_prompt += (
                                     f"\n\n# RETRY NOTICE\n"
                                     f"The previous response was invalid: {failure_reason}.\n"
-                                    f"Please respond again strictly in {lang} and within the limit.\n"
+                                    f"Please respond again strictly in {lang} and within the target limit.\n"
                                 )
                             response = client.models.generate_content(
                                 model="models/gemma-3-27b-it",
@@ -288,7 +407,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 continue
 
                             candidate_report = json.loads(json_match.group(0))
-                            valid, failure_reason = validate_report_output(candidate_report, lang, word_limit)
+                            valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit)
                             if valid:
                                 report = candidate_report
                                 break
