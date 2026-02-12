@@ -70,14 +70,37 @@ def normalize_report_value(value) -> str:
 def min_section_length(word_limit: int) -> int:
     return max(20, int(word_limit * 0.03))
 
+def normalize_report_keys(report: dict) -> dict:
+    key_aliases = {
+        "maintenance": ["maintenance", "cellular_maintenance", "duy_tri", "duy trì", "bảo trì"],
+        "tracking": ["tracking", "key_tracking", "theo_doi", "theo dõi", "chi_so_theo_doi", "chỉ số theo dõi"],
+        "nutrition": ["nutrition", "cellular_nutrition", "dinh_duong", "dinh dưỡng"],
+        "supplements": ["supplements", "functional_supplements", "bo_sung", "bổ sung"],
+        "lifestyle": ["lifestyle", "lifestyle_tips", "loi_song", "lối sống"],
+    }
+    normalized = {}
+    lowered = {str(k).strip().lower(): v for k, v in report.items()}
+    for target, aliases in key_aliases.items():
+        value = report.get(target)
+        if value is None:
+            for alias in aliases:
+                alias_value = lowered.get(alias.lower())
+                if alias_value is not None:
+                    value = alias_value
+                    break
+        normalized[target] = value if value is not None else ""
+    return normalized
+
+
 def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str, int]:
-    combined_text = " ".join(normalize_report_value(v) for v in report.values())
+    normalized_report = normalize_report_keys(report)
+    combined_text = " ".join(normalize_report_value(v) for v in normalized_report.values())
     if not is_language_valid(combined_text, lang):
         return False, "語言不符合選擇", count_output_length(combined_text, lang)
     section_min = min_section_length(word_limit)
     required_keys = ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]
     for key in required_keys:
-        section_text = normalize_report_value(report.get(key)).strip()
+        section_text = normalize_report_value(normalized_report.get(key)).strip()
         if not section_text:
             return False, f"{key} 欄位內容為空", count_output_length(combined_text, lang)
         section_length = count_output_length(section_text, lang)
@@ -312,6 +335,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         "supplements": "...",
                         "lifestyle": "..."
                         }}
+                        IMPORTANT: Keep these 5 JSON keys in English exactly as shown, and provide non-empty content for every key.
                         """
 
                         lifestyle_guidance = """
@@ -387,6 +411,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 "supplements": "...",
                                 "lifestyle": "..."
                                 }}
+                                IMPORTANT: Keep these 5 JSON keys in English exactly as shown, and provide non-empty content for every key.
                                 """
                                 full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
                                 full_combined_prompt += (
@@ -409,6 +434,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 continue
 
                             candidate_report = json.loads(json_match.group(0))
+                            candidate_report = normalize_report_keys(candidate_report)
                             valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit)
                             if valid:
                                 report = candidate_report
