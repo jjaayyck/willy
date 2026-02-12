@@ -46,7 +46,9 @@ def is_language_valid(text: str, lang: str) -> bool:
     if lang == "한국어":
         return bool(re.search(r"[\uac00-\ud7af]", text))
     if lang == "Tiếng Việt":
-        return bool(re.search(r"[A-Za-zÀ-ỹ]", text))
+        has_vietnamese_text = bool(re.search(r"[A-Za-zÀ-ỹ]", text))
+        has_other_cjk = bool(re.search(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]", text))
+        return has_vietnamese_text and not has_other_cjk
     return True
 
 def count_output_length(text: str, lang: str) -> int:
@@ -239,7 +241,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             "lifestyle": "■ 생활 전략 팁:",
                         },
                         "Tiếng Việt": {
-                            "intro": "Kết quả kiểm tra【{item}】có điểm phòng ngừa thấp.",
+                            "intro": "Kết quả kiểm tra【{item}】 có điểm phòng ngừa thấp.",
                             "maintenance": "■ Duy trì tế bào:",
                             "tracking": "■ Các chỉ số cần theo dõi:",
                             "nutrition": "■ Dinh dưỡng tế bào:",
