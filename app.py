@@ -399,8 +399,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     if betel_nut_status:
                         habit_lines_zh.append(f"吃檳榔問卷結果：{betel_nut_status}。")
                         habit_lines_en.append(f"- Betel nut questionnaire result: {betel_nut_status}")
-                    habit_instruction_zh = "\n                    ".join(habit_lines_zh) if habit_lines_zh else ""
-                    habit_instruction_en = "\n                    ".join(habit_lines_en) if habit_lines_en else ""
+                    habit_instruction_zh = "\n                    ".join(habit_lines_zh) if habit_lines_zh else "生活習慣（抽菸/喝酒/吃檳榔）：全部未提供。【絕對禁止】在報告中提及任何與抽菸、喝酒、檳榔相關的風險或建議。"
+                    habit_instruction_en = "\n                    ".join(habit_lines_en) if habit_lines_en else "- Lifestyle Habits (smoking/alcohol/betel nut): ALL NOT PROVIDED. DO NOT mention any smoking, alcohol, or betel nut related advice."
                     smoking_prompt_value = smoking_status or "N/A"
                     drinking_prompt_value = drinking_status or "N/A"
                     betel_prompt_value = betel_nut_status or "N/A"
@@ -417,6 +417,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     {family_history_instruction_zh}
                     {habit_instruction_zh}
                     分析項目：{item}。
+                    【強制基因指定】：{gene_instruction}
+                    【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                     字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                     生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                     各段落字數上限：{budget_hint}。
@@ -513,6 +515,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             {family_history_instruction_zh}
                             {habit_instruction_zh}
                             分析項目：{item}。
+                            【強制基因指定】：{gene_instruction}
+                            【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                             字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                             生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                             各段落字數上限：{budget_hint}。
