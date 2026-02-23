@@ -251,12 +251,31 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 # 從 Google Sheet 讀取資料
                 records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None, GOOGLE_SHEET_GID)
 
+                # ===== 診斷輸出（debug，確認後可移除）=====
+                st.write(f"🔍 DEBUG: 共讀取 {len(records)} 筆記錄")
+                if records:
+                    st.write(f"🔍 DEBUG: 欄位名稱 = {list(records[0].keys())}")
+                # ===== 診斷輸出結束 =====
+
                 # 找對應資料列（找不到時顯示警告，繼續執行）
                 matched_row = find_row_by_application_id(records, application_id)
+
+                # ===== 診斷輸出（debug，確認後可移除）=====
+                st.write(f"🔍 DEBUG: matched_row = {'找到了' if matched_row else 'None'}")
+                if matched_row:
+                    st.write(f"🔍 DEBUG: matched_row keys = {list(matched_row.keys())}")
+                # ===== 診斷輸出結束 =====
+
                 if matched_row is None and application_id:
                     st.warning(f"⚠️ Google Sheet 中找不到申請單編號：{application_id}（病史將顯示為未提供）")
 
                 personal_history, family_history = extract_medical_histories(matched_row)
+
+                # ===== 診斷輸出（debug，確認後可移除）=====
+                st.write(f"🔍 DEBUG: personal_history = '{personal_history}'")
+                st.write(f"🔍 DEBUG: family_history = '{family_history}'")
+                # ===== 診斷輸出結束 =====
+
                 personal_history = personal_history or "未提供"
                 family_history = family_history or "未提供"
                 st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id or '（無法解析）'}")
