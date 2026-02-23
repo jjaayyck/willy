@@ -241,13 +241,25 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
             with st.spinner("正在逐項分析中，請稍候..."):
                 user_info, items, mode = extract_data_from_upload(up_excel)
 
-                application_id = parse_application_id(up_excel.name)
+                # 解析申請單編號（檔名格式不符時給出警告，繼續執行）
+                try:
+                    application_id = parse_application_id(up_excel.name)
+                except ValueError as e:
+                    application_id = ""
+                    st.warning(f"⚠️ 無法從檔名解析申請單編號：{e}（病史將顯示為未提供）")
+
+                # 從 Google Sheet 讀取資料
                 records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None, GOOGLE_SHEET_GID)
+
+                # 找對應資料列（找不到時顯示警告，繼續執行）
                 matched_row = find_row_by_application_id(records, application_id)
+                if matched_row is None and application_id:
+                    st.warning(f"⚠️ Google Sheet 中找不到申請單編號：{application_id}（病史將顯示為未提供）")
+
                 personal_history, family_history = extract_medical_histories(matched_row)
                 personal_history = personal_history or "未提供"
                 family_history = family_history or "未提供"
-                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
+                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id or '（無法解析）'}")
                 st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
                 st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
 

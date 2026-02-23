@@ -16,6 +16,9 @@ def normalize_record_keys(records):
 
 
 def find_row_by_application_id(records, application_id, id_column="申請單編號"):
+    """找不到時回傳 None（不拋例外），讓呼叫端決定如何處理。"""
+    if not application_id:
+        return None
     application_id = str(application_id).strip()
     for r in records:
         if str(r.get(id_column, "")).strip() == application_id:
@@ -58,8 +61,18 @@ def find_best_matched_value(row: dict, candidate_keys: list[str], keyword_groups
 
 
 def extract_medical_histories(row, personal_keys=None, family_keys=None) -> tuple[str, str]:
-    personal_keys = personal_keys or ["個人疾病史", "個人病史", "個人史", "過往病史", "既往病史"]
-    family_keys = family_keys or ["家族疾病史", "家族病史", "家族史"]
+    """row 為 None 時直接回傳空字串，不拋例外。"""
+    if not row:
+        return "", ""
+
+    personal_keys = personal_keys or [
+        "個人疾病史（可複選）", "個人疾病史(可複選)",   # Google Form 實際欄名
+        "個人疾病史", "個人病史", "個人史", "過往病史", "既往病史",
+    ]
+    family_keys = family_keys or [
+        "家族疾病史（可複選）", "家族疾病史(可複選)",   # Google Form 實際欄名
+        "家族疾病史", "家族病史", "家族史",
+    ]
 
     personal_keyword_groups = [
         ("個人", "疾病", "史"),
