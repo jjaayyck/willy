@@ -2,3 +2,5 @@ streamlit
 google-genai
 openpyxl
 python-dotenv
+gspread
+google-auth
