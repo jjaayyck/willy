@@ -381,6 +381,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         habit_lines_en.append(f"- Betel nut questionnaire result: {betel_nut_status}")
                     habit_instruction_zh = "\n                    ".join(habit_lines_zh) if habit_lines_zh else ""
                     habit_instruction_en = "\n                    ".join(habit_lines_en) if habit_lines_en else ""
+                    smoking_prompt_value = smoking_status or "N/A"
+                    drinking_prompt_value = drinking_status or "N/A"
+                    betel_prompt_value = betel_nut_status or "N/A"
 
                     # 強化語言要求，確保 AI 看到
                     user_instruction = f"""
@@ -424,6 +427,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Personal Medical History: {personal_history}
                     {family_history_instruction_en}
                     {habit_instruction_en}
+                    - Smoking Status (binary): {smoking_prompt_value}
+                    - Alcohol Status (binary): {drinking_prompt_value}
+                    - Betel Nut Status (binary): {betel_prompt_value}
                     - Target Item: {item}
                     - Word Limit (Hard Max, non-space characters): {word_limit}
                     - Target Limit (Use This): {generation_limit}
@@ -435,7 +441,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     # RESPONSE FORMAT
                     If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
-                    If smoking/alcohol/betel nut questionnaire results are provided, incorporate them into risk interpretation and recommendations.
+                    Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                    If a status is 「無」 or N/A, do not provide related risk claims or lifestyle advice for that habit.
+                    Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                    If the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
                     Please provide the analysis strictly in the following JSON structure:
                     {{
                     "maintenance": "...",
@@ -509,6 +518,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Personal Medical History: {personal_history}
                             {family_history_instruction_en}
                             {habit_instruction_en}
+                            - Smoking Status (binary): {smoking_prompt_value}
+                            - Alcohol Status (binary): {drinking_prompt_value}
+                            - Betel Nut Status (binary): {betel_prompt_value}
                             - Target Item: {item}
                             - Word Limit (Hard Max, non-space characters): {word_limit}
                             - Target Limit (Use This): {generation_limit}
@@ -520,7 +532,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                             # RESPONSE FORMAT
                             If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
-                            If smoking/alcohol/betel nut questionnaire results are provided, incorporate them into risk interpretation and recommendations.
+                            Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                            If a status is 「無」 or N/A, do not provide related risk claims or lifestyle advice for that habit.
+                            Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                            If the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
                             Please provide the analysis strictly in the following JSON structure:
                             {{
                             "maintenance": "...",
@@ -577,4 +592,3 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
-
