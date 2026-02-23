@@ -90,3 +90,32 @@ def extract_medical_histories(row, personal_keys=None, family_keys=None) -> tupl
     family_history = find_best_matched_value(row, family_keys, family_keyword_groups)
 
     return personal_history, family_history
+
+
+def extract_lifestyle_habits(row, smoking_keys=None, drinking_keys=None, betel_keys=None) -> dict[str, str]:
+    """擷取抽菸/喝酒/吃檳榔欄位，找不到或空值時回傳空字串。"""
+    if not row:
+        return {"smoking": "", "drinking": "", "betel_nut": ""}
+
+    smoking_keys = smoking_keys or ["抽菸", "是否抽菸", "有無抽菸", "吸菸", "是否吸菸"]
+    drinking_keys = drinking_keys or ["喝酒", "是否喝酒", "有無喝酒", "飲酒", "是否飲酒"]
+    betel_keys = betel_keys or ["吃檳榔", "是否吃檳榔", "有無吃檳榔", "檳榔", "嚼檳榔"]
+
+    smoking_keyword_groups = [
+        ("抽", "菸"),
+        ("吸", "菸"),
+    ]
+    drinking_keyword_groups = [
+        ("喝", "酒"),
+        ("飲", "酒"),
+    ]
+    betel_keyword_groups = [
+        ("吃", "檳榔"),
+        ("檳榔",),
+    ]
+
+    return {
+        "smoking": find_best_matched_value(row, smoking_keys, smoking_keyword_groups),
+        "drinking": find_best_matched_value(row, drinking_keys, drinking_keyword_groups),
+        "betel_nut": find_best_matched_value(row, betel_keys, betel_keyword_groups),
+    }

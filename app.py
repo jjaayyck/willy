@@ -13,6 +13,7 @@ from sheet_utils import (
     normalize_record_keys,
     find_row_by_application_id,
     extract_medical_histories,
+    extract_lifestyle_habits,
 )
 
 # 載入環境變數
@@ -270,6 +271,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     st.warning(f"⚠️ Google Sheet 中找不到申請單編號：{application_id}（病史將顯示為未提供）")
 
                 personal_history, family_history = extract_medical_histories(matched_row)
+                lifestyle_habits = extract_lifestyle_habits(matched_row)
+
+                smoking_status = lifestyle_habits.get("smoking", "")
+                drinking_status = lifestyle_habits.get("drinking", "")
+                betel_nut_status = lifestyle_habits.get("betel_nut", "")
 
                 # ===== 診斷輸出（debug，確認後可移除）=====
                 st.write(f"🔍 DEBUG: personal_history = '{personal_history}'")
@@ -277,10 +283,23 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 # ===== 診斷輸出結束 =====
 
                 personal_history = personal_history or "未提供"
-                family_history = family_history or "未提供"
+                family_history = family_history or ""
+                smoking_status = smoking_status or ""
+                drinking_status = drinking_status or ""
+                betel_nut_status = betel_nut_status or ""
+                has_family_history = bool(family_history)
                 st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id or '（無法解析）'}")
                 st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
-                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
+                habit_display_parts = []
+                if smoking_status:
+                    habit_display_parts.append(f"抽菸：{smoking_status}")
+                if drinking_status:
+                    habit_display_parts.append(f"喝酒：{drinking_status}")
+                if betel_nut_status:
+                    habit_display_parts.append(f"吃檳榔：{betel_nut_status}")
+                habit_display = "｜".join(habit_display_parts) if habit_display_parts else "（未提供）"
+                family_display = family_history if has_family_history else "（不參考）"
+                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_display}｜生活習慣：{habit_display}")
 
                 if not items:
                     st.warning("該檔案中無符合篩選條件的低分項目。")
@@ -342,6 +361,27 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     budget_hint = format_budget_hint(build_length_budget(generation_limit))
                     section_min = min_section_length(word_limit)
                     
+                    family_history_instruction_zh = (
+                        f"家族疾病史：{family_history}。" if has_family_history else "家族疾病史：不參考。"
+                    )
+                    family_history_instruction_en = (
+                        f"- Family Medical History: {family_history}" if has_family_history else "- Family Medical History: N/A (do not reference family history)"
+                    )
+
+                    habit_lines_zh = []
+                    habit_lines_en = []
+                    if smoking_status:
+                        habit_lines_zh.append(f"抽菸問卷結果：{smoking_status}。")
+                        habit_lines_en.append(f"- Smoking questionnaire result: {smoking_status}")
+                    if drinking_status:
+                        habit_lines_zh.append(f"喝酒問卷結果：{drinking_status}。")
+                        habit_lines_en.append(f"- Alcohol questionnaire result: {drinking_status}")
+                    if betel_nut_status:
+                        habit_lines_zh.append(f"吃檳榔問卷結果：{betel_nut_status}。")
+                        habit_lines_en.append(f"- Betel nut questionnaire result: {betel_nut_status}")
+                    habit_instruction_zh = "\n                    ".join(habit_lines_zh) if habit_lines_zh else ""
+                    habit_instruction_en = "\n                    ".join(habit_lines_en) if habit_lines_en else ""
+
                     # 強化語言要求，確保 AI 看到
                     user_instruction = f"""
                     ### IMPORTANT LANGUAGE REQUIREMENT: 
@@ -351,7 +391,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                     申請單編號：{application_id}。
                     個人疾病史：{personal_history}。
-                    家族疾病史：{family_history}。
+                    {family_history_instruction_zh}
+                    {habit_instruction_zh}
                     分析項目：{item}。
                     字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                     生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -381,7 +422,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                     - Application ID: {application_id}
                     - Personal Medical History: {personal_history}
-                    - Family Medical History: {family_history}
+                    {family_history_instruction_en}
+                    {habit_instruction_en}
                     - Target Item: {item}
                     - Word Limit (Hard Max, non-space characters): {word_limit}
                     - Target Limit (Use This): {generation_limit}
@@ -392,7 +434,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Valid Tracking Items: [{pdf_tests}]
 
                     # RESPONSE FORMAT
-                    Please integrate personal and family medical history into risk interpretation and recommendations.
+                    If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
+                    If smoking/alcohol/betel nut questionnaire results are provided, incorporate them into risk interpretation and recommendations.
                     Please provide the analysis strictly in the following JSON structure:
                     {{
                     "maintenance": "...",
@@ -434,7 +477,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                             申請單編號：{application_id}。
                             個人疾病史：{personal_history}。
-                            家族疾病史：{family_history}。
+                            {family_history_instruction_zh}
+                            {habit_instruction_zh}
                             分析項目：{item}。
                             字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                             生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -463,7 +507,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                             - Application ID: {application_id}
                             - Personal Medical History: {personal_history}
-                            - Family Medical History: {family_history}
+                            {family_history_instruction_en}
+                            {habit_instruction_en}
                             - Target Item: {item}
                             - Word Limit (Hard Max, non-space characters): {word_limit}
                             - Target Limit (Use This): {generation_limit}
@@ -474,7 +519,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Valid Tracking Items: [{pdf_tests}]
 
                             # RESPONSE FORMAT
-                            Please integrate personal and family medical history into risk interpretation and recommendations.
+                            If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
+                            If smoking/alcohol/betel nut questionnaire results are provided, incorporate them into risk interpretation and recommendations.
                             Please provide the analysis strictly in the following JSON structure:
                             {{
                             "maintenance": "...",
@@ -531,6 +577,4 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
-
-
 
