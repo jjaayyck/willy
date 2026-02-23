@@ -92,6 +92,29 @@ def extract_medical_histories(row, personal_keys=None, family_keys=None) -> tupl
     return personal_history, family_history
 
 
+def normalize_binary_habit_value(value) -> str:
+    """將習慣欄位值正規化為「有/無」，無法判斷時回傳空字串。"""
+    text = safe_string(value)
+    if not text:
+        return ""
+
+    normalized = text.lower().replace(" ", "")
+    yes_tokens = {"有", "是", "y", "yes", "true", "1"}
+    no_tokens = {"無", "否", "沒有", "no", "n", "false", "0"}
+
+    if text in yes_tokens or normalized in yes_tokens:
+        return "有"
+    if text in no_tokens or normalized in no_tokens:
+        return "無"
+
+    # 容錯：若含有明確語意，也轉為有/無
+    if "沒有" in text or "無" == text:
+        return "無"
+    if "有" in text:
+        return "有"
+    return ""
+
+
 def extract_lifestyle_habits(row, smoking_keys=None, drinking_keys=None, betel_keys=None) -> dict[str, str]:
     """擷取抽菸/喝酒/吃檳榔欄位，找不到或空值時回傳空字串。"""
     if not row:
@@ -114,8 +137,12 @@ def extract_lifestyle_habits(row, smoking_keys=None, drinking_keys=None, betel_k
         ("檳榔",),
     ]
 
+    smoking = normalize_binary_habit_value(find_best_matched_value(row, smoking_keys, smoking_keyword_groups))
+    drinking = normalize_binary_habit_value(find_best_matched_value(row, drinking_keys, drinking_keyword_groups))
+    betel_nut = normalize_binary_habit_value(find_best_matched_value(row, betel_keys, betel_keyword_groups))
+
     return {
-        "smoking": find_best_matched_value(row, smoking_keys, smoking_keyword_groups),
-        "drinking": find_best_matched_value(row, drinking_keys, drinking_keyword_groups),
-        "betel_nut": find_best_matched_value(row, betel_keys, betel_keyword_groups),
+        "smoking": smoking,
+        "drinking": drinking,
+        "betel_nut": betel_nut,
     }
