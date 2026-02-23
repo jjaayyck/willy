@@ -4,9 +4,10 @@ import openpyxl
 import json
 import re
 import time
-from pathlib import Path
+import gspread
 from google import genai
 from dotenv import load_dotenv
+from google.oauth2.service_account import Credentials
 from sheet_utils import (
     parse_application_id,
     normalize_record_keys,
@@ -121,21 +122,32 @@ def format_budget_hint(budget: dict) -> str:
     )
 
 
-def load_records_from_sheet(uploaded_sheet):
-    wb = openpyxl.load_workbook(uploaded_sheet, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
-        return []
-    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
-    records = []
-    for row in rows[1:]:
-        if row is None:
-            continue
-        record = {headers[i]: row[i] for i in range(min(len(headers), len(row))) if headers[i]}
-        if any(v is not None and str(v).strip() for v in record.values()):
-            records.append(record)
-    return normalize_record_keys(records)
+def load_records_from_google_sheet(sheet_url: str, worksheet_name: str | None = None):
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+
+    service_account_info = None
+    if "gcp_service_account" in st.secrets:
+        service_account_info = dict(st.secrets["gcp_service_account"])
+    else:
+        service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        if service_account_json:
+            service_account_info = json.loads(service_account_json)
+
+    if service_account_info:
+        credentials = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+    else:
+        service_account_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+        if not service_account_file:
+            raise ValueError("缺少 Google Service Account 設定，請設定 Streamlit secrets 或 GOOGLE_SERVICE_ACCOUNT_FILE / GOOGLE_SERVICE_ACCOUNT_JSON。")
+        credentials = Credentials.from_service_account_file(service_account_file, scopes=scopes)
+
+    gc = gspread.authorize(credentials)
+    spreadsheet = gc.open_by_url(sheet_url)
+    worksheet = spreadsheet.worksheet(worksheet_name) if worksheet_name else spreadsheet.sheet1
+    return normalize_record_keys(worksheet.get_all_records())
 
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
@@ -202,39 +214,44 @@ with st.sidebar:
 
 # 【修改點 1】：移除提示詞上傳區，僅保留 Excel 上傳
 up_excel = st.file_uploader("上傳檢測 Excel 檔案", type=["xlsx"])
-up_sheet = st.file_uploader("上傳申請單資料 Sheet (Excel)", type=["xlsx"], help="需含申請單編號、個人疾病史、家族疾病史欄位")
 
-# 【修改點 2】：設定固定的提示詞檔名 (請確保 GitHub 上的檔名與此完全一致)
+# 固定設定：Google Sheet 與提示詞檔
+GOOGLE_SHEET_URL = os.getenv("GOOGLE_SHEET_URL", "").strip()
+GOOGLE_SHEET_WORKSHEET = os.getenv("GOOGLE_SHEET_WORKSHEET", "").strip()
 PROMPT_FILE_NAME = "系統提示詞_v3.1_純文字.txt"
 
-if st.button("🚀 開始分析報告") and up_excel and up_sheet and api_key:
+if st.button("🚀 開始分析報告") and up_excel and api_key:
     # 檢查提示詞檔案是否存在
     if not os.path.exists(PROMPT_FILE_NAME):
         st.error(f"❌ 找不到設定檔：{PROMPT_FILE_NAME}。請確認檔案已上傳至 GitHub。")
     else:
-        try:
-            client = genai.Client(api_key=api_key)
+        if not GOOGLE_SHEET_URL:
+            st.error("❌ 缺少固定 Google Sheet URL，請設定環境變數 GOOGLE_SHEET_URL。")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
             
-            # 【修改點 3】：自動讀取本地檔案中的提示詞
-            with open(PROMPT_FILE_NAME, "r", encoding="utf-8") as f:
-                bg_prompt = f.read()
+                # 【修改點 3】：自動讀取本地檔案中的提示詞
+                with open(PROMPT_FILE_NAME, "r", encoding="utf-8") as f:
+                    bg_prompt = f.read()
             
-            with st.spinner("正在逐項分析中，請稍候..."):
-                user_info, items, mode = extract_data_from_upload(up_excel)
+                with st.spinner("正在逐項分析中，請稍候..."):
+                    user_info, items, mode = extract_data_from_upload(up_excel)
 
-                application_id = parse_application_id(up_excel.name)
-                records = load_records_from_sheet(up_sheet)
-                matched_row = find_row_by_application_id(records, application_id)
-                personal_history, family_history = extract_medical_histories(matched_row)
-                personal_history = personal_history or "未提供"
-                family_history = family_history or "未提供"
-                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
-                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
+                    application_id = parse_application_id(up_excel.name)
+                    records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None)
+                    matched_row = find_row_by_application_id(records, application_id)
+                    personal_history, family_history = extract_medical_histories(matched_row)
+                    personal_history = personal_history or "未提供"
+                    family_history = family_history or "未提供"
+                    st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
+                    st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
+                    st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
 
-                if not items:
-                    st.warning("該檔案中無符合篩選條件的低分項目。")
-                else:
-                    st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
+                    if not items:
+                        st.warning("該檔案中無符合篩選條件的低分項目。")
+                    else:
+                        st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
                     
                     final_text = ""
                     progress_bar = st.progress(0)
@@ -478,8 +495,8 @@ if st.button("🚀 開始分析報告") and up_excel and up_sheet and api_key:
                     st.text_area("結果預覽", final_text, height=400)
                     st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
 
-        except Exception as e:
-            st.error(f"分析失敗：{e}")
+            except Exception as e:
+                st.error(f"分析失敗：{e}")
 
 
 
