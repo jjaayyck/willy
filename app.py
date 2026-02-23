@@ -352,10 +352,30 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 }
                 H = HEADERS.get(lang, HEADERS["繁體中文"])
 
+                # 【強效機制】：手動定義關鍵主題與基因的對應關係，避免 AI 混淆
+                CRITICAL_GENE_MAPPING = {
+                    "胃癌": "MTHFR",
+                    "大腸直腸癌": "MTHFR",
+                    "卵巢癌": "MTHFR",
+                    "前列腺癌": "MTHFR",
+                    "頭頸癌": "CYP1A1",
+                    "肝癌": "CYP1A1",
+                    "肺癌": "EGF",
+                    "乳癌": "BRCA1",
+                    "子宮內膜癌": "MDM2",
+                    "胰臟癌": "TERT",
+                    "肝臟解毒": "NAT2",
+                }
+
                 # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
                 for index, item in enumerate(items):
                     st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                     
+                    # 獲取手動指定的基因（如果有）
+                    manual_gene = CRITICAL_GENE_MAPPING.get(item, "")
+                    gene_instruction = f"本項目對應的主要基因必須為：{manual_gene}。" if manual_gene else "請依據提示詞中的對應表選取正確基因。"
+                    gene_instruction_en = f"The primary gene for this topic MUST be: {manual_gene}." if manual_gene else "Select the correct gene based on the mapping table in the system prompt."
+
                     pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                     generation_limit = max(1, int(word_limit))
                     budget_hint = format_budget_hint(build_length_budget(generation_limit))
@@ -427,10 +447,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Personal Medical History: {personal_history}
                     {family_history_instruction_en}
                     {habit_instruction_en}
-                    - Smoking Status (binary): {smoking_prompt_value}
-                    - Alcohol Status (binary): {drinking_prompt_value}
-                    - Betel Nut Status (binary): {betel_prompt_value}
+                    - Smoking Status (binary): {smoking_prompt_value if smoking_prompt_value != "N/A" else "None/Not Provided"}
+                    - Alcohol Status (binary): {drinking_prompt_value if drinking_prompt_value != "N/A" else "None/Not Provided"}
+                    - Betel Nut Status (binary): {betel_prompt_value if betel_prompt_value != "N/A" else "None/Not Provided"}
                     - Target Item: {item}
+                    - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
+                    - TONE: Warm, clinical yet personalized. Use "您" (You) to address the user directly. DO NOT use "受測者" (Subject).
                     - Word Limit (Hard Max, non-space characters): {word_limit}
                     - Target Limit (Use This): {generation_limit}
                     - Section Budgets: {budget_hint}
@@ -440,10 +462,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Valid Tracking Items: [{pdf_tests}]
 
                     # RESPONSE FORMAT
-                    - STRICT: If family history is marked as N/A, do not mention family history at all.
+                    - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
+                    - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
                     - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
                     - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
-                    - STRICT: Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                    - STRICT: {gene_instruction_en}
                     - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
                     - Focus on mechanisms strictly relevant to the target item.
                     Please provide the analysis strictly in the following JSON structure:
@@ -532,10 +555,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Valid Tracking Items: [{pdf_tests}]
 
                             # RESPONSE FORMAT
-                            - STRICT: If family history is marked as N/A, do not mention family history at all.
+                            - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
+                            - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
                             - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
                             - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
-                            - STRICT: Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                            - STRICT: {gene_instruction_en}
                             - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
                             - Focus on mechanisms strictly relevant to the target item.
                             Please provide the analysis strictly in the following JSON structure:
