@@ -18,3 +18,30 @@ def find_row_by_application_id(records, application_id, id_column="申請單編�
         if str(r.get(id_column, "")).strip() == application_id:
             return r
     raise LookupError(f"找不到申請單編號：{application_id}")
+
+
+def safe_string(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def extract_medical_histories(row, personal_keys=None, family_keys=None) -> tuple[str, str]:
+    personal_keys = personal_keys or ["個人疾病史", "個人病史"]
+    family_keys = family_keys or ["家族疾病史", "家族病史"]
+
+    personal_history = ""
+    for key in personal_keys:
+        value = safe_string(row.get(key))
+        if value:
+            personal_history = value
+            break
+
+    family_history = ""
+    for key in family_keys:
+        value = safe_string(row.get(key))
+        if value:
+            family_history = value
+            break
+
+    return personal_history, family_history

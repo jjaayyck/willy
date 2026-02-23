@@ -7,6 +7,12 @@ import time
 from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
+from sheet_utils import (
+    parse_application_id,
+    normalize_record_keys,
+    find_row_by_application_id,
+    extract_medical_histories,
+)
 
 # 載入環境變數
 load_dotenv()
@@ -114,6 +120,23 @@ def format_budget_hint(budget: dict) -> str:
         f'lifestyle≤{budget["lifestyle"]}'
     )
 
+
+def load_records_from_sheet(uploaded_sheet):
+    wb = openpyxl.load_workbook(uploaded_sheet, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
+    records = []
+    for row in rows[1:]:
+        if row is None:
+            continue
+        record = {headers[i]: row[i] for i in range(min(len(headers), len(row))) if headers[i]}
+        if any(v is not None and str(v).strip() for v in record.values()):
+            records.append(record)
+    return normalize_record_keys(records)
+
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
 def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
     # Streamlit 上傳的檔案是 BytesIO 物件
@@ -178,12 +201,13 @@ with st.sidebar:
     word_limit = st.number_input("字數限制", value=800)
 
 # 【修改點 1】：移除提示詞上傳區，僅保留 Excel 上傳
-up_excel = st.file_uploader("上傳 Excel 檔案", type=["xlsx"])
+up_excel = st.file_uploader("上傳檢測 Excel 檔案", type=["xlsx"])
+up_sheet = st.file_uploader("上傳申請單資料 Sheet (Excel)", type=["xlsx"], help="需含申請單編號、個人疾病史、家族疾病史欄位")
 
 # 【修改點 2】：設定固定的提示詞檔名 (請確保 GitHub 上的檔名與此完全一致)
 PROMPT_FILE_NAME = "系統提示詞_v3.1_純文字.txt"
 
-if st.button("🚀 開始分析報告") and up_excel and api_key:
+if st.button("🚀 開始分析報告") and up_excel and up_sheet and api_key:
     # 檢查提示詞檔案是否存在
     if not os.path.exists(PROMPT_FILE_NAME):
         st.error(f"❌ 找不到設定檔：{PROMPT_FILE_NAME}。請確認檔案已上傳至 GitHub。")
@@ -197,7 +221,16 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
             
             with st.spinner("正在逐項分析中，請稍候..."):
                 user_info, items, mode = extract_data_from_upload(up_excel)
-                
+
+                application_id = parse_application_id(up_excel.name)
+                records = load_records_from_sheet(up_sheet)
+                matched_row = find_row_by_application_id(records, application_id)
+                personal_history, family_history = extract_medical_histories(matched_row)
+                personal_history = personal_history or "未提供"
+                family_history = family_history or "未提供"
+                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
+                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
+
                 if not items:
                     st.warning("該檔案中無符合篩選條件的低分項目。")
                 else:
@@ -265,6 +298,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         (目前的語言要求：{lang})
 
                         受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                        申請單編號：{application_id}。
+                        個人疾病史：{personal_history}。
+                        家族疾病史：{family_history}。
                         分析項目：{item}。
                         字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                         生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -292,6 +328,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                         # SUBJECT DATA
                         - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                        - Application ID: {application_id}
+                        - Personal Medical History: {personal_history}
+                        - Family Medical History: {family_history}
                         - Target Item: {item}
                         - Word Limit (Hard Max, non-space characters): {word_limit}
                         - Target Limit (Use This): {generation_limit}
@@ -302,6 +341,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         - Valid Tracking Items: [{pdf_tests}]
 
                         # RESPONSE FORMAT
+                        Please integrate personal and family medical history into risk interpretation and recommendations.
                         Please provide the analysis strictly in the following JSON structure:
                         {{
                         "maintenance": "...",
@@ -341,6 +381,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 (目前的語言要求：{lang})
 
                                 受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                                申請單編號：{application_id}。
+                                個人疾病史：{personal_history}。
+                                家族疾病史：{family_history}。
                                 分析項目：{item}。
                                 字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                                 生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -367,6 +410,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                                 # SUBJECT DATA
                                 - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                                - Application ID: {application_id}
+                                - Personal Medical History: {personal_history}
+                                - Family Medical History: {family_history}
                                 - Target Item: {item}
                                 - Word Limit (Hard Max, non-space characters): {word_limit}
                                 - Target Limit (Use This): {generation_limit}
@@ -377,6 +423,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 - Valid Tracking Items: [{pdf_tests}]
 
                                 # RESPONSE FORMAT
+                                Please integrate personal and family medical history into risk interpretation and recommendations.
                                 Please provide the analysis strictly in the following JSON structure:
                                 {{
                                 "maintenance": "...",
