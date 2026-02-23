@@ -23,7 +23,7 @@ def find_row_by_application_id(records, application_id, id_column="申請單編�
     for r in records:
         if str(r.get(id_column, "")).strip() == application_id:
             return r
-    raise LookupError(f"找不到申請單編號：{application_id}")
+    return None
 
 
 def safe_string(value) -> str:
