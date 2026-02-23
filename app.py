@@ -122,7 +122,7 @@ def format_budget_hint(budget: dict) -> str:
     )
 
 
-def load_records_from_google_sheet(sheet_url: str, worksheet_name: str | None = None):
+def load_records_from_google_sheet(sheet_url: str, worksheet_name: str | None = None, worksheet_gid: int | None = None):
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
@@ -146,7 +146,12 @@ def load_records_from_google_sheet(sheet_url: str, worksheet_name: str | None = 
 
     gc = gspread.authorize(credentials)
     spreadsheet = gc.open_by_url(sheet_url)
-    worksheet = spreadsheet.worksheet(worksheet_name) if worksheet_name else spreadsheet.sheet1
+    if worksheet_gid is not None:
+        worksheet = spreadsheet.get_worksheet_by_id(worksheet_gid)
+    elif worksheet_name:
+        worksheet = spreadsheet.worksheet(worksheet_name)
+    else:
+        worksheet = spreadsheet.sheet1
     return normalize_record_keys(worksheet.get_all_records())
 
 # --- 1. 核心邏輯：擷取 Excel 數據 ---
@@ -216,8 +221,9 @@ with st.sidebar:
 up_excel = st.file_uploader("上傳檢測 Excel 檔案", type=["xlsx"])
 
 # 固定設定：Google Sheet 與提示詞檔
-GOOGLE_SHEET_URL = os.getenv("GOOGLE_SHEET_URL", "").strip()
-GOOGLE_SHEET_WORKSHEET = os.getenv("GOOGLE_SHEET_WORKSHEET", "").strip()
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JDaap1KOnKn4ZefISp27edfW1nWJyf4EFWWrd4dxVdU/edit?resourcekey=&gid=1866179831#gid=1866179831"
+GOOGLE_SHEET_WORKSHEET = ""
+GOOGLE_SHEET_GID = 1866179831
 PROMPT_FILE_NAME = "系統提示詞_v3.1_純文字.txt"
 
 if st.button("🚀 開始分析報告") and up_excel and api_key:
@@ -225,278 +231,275 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
     if not os.path.exists(PROMPT_FILE_NAME):
         st.error(f"❌ 找不到設定檔：{PROMPT_FILE_NAME}。請確認檔案已上傳至 GitHub。")
     else:
-        if not GOOGLE_SHEET_URL:
-            st.error("❌ 缺少固定 Google Sheet URL，請設定環境變數 GOOGLE_SHEET_URL。")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
+        try:
+            client = genai.Client(api_key=api_key)
             
-                # 【修改點 3】：自動讀取本地檔案中的提示詞
-                with open(PROMPT_FILE_NAME, "r", encoding="utf-8") as f:
-                    bg_prompt = f.read()
-            
-                with st.spinner("正在逐項分析中，請稍候..."):
-                    user_info, items, mode = extract_data_from_upload(up_excel)
+            # 【修改點 3】：自動讀取本地檔案中的提示詞
+            with open(PROMPT_FILE_NAME, "r", encoding="utf-8") as f:
+                bg_prompt = f.read()
+        
+            with st.spinner("正在逐項分析中，請稍候..."):
+                user_info, items, mode = extract_data_from_upload(up_excel)
 
-                    application_id = parse_application_id(up_excel.name)
-                    records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None)
-                    matched_row = find_row_by_application_id(records, application_id)
-                    personal_history, family_history = extract_medical_histories(matched_row)
-                    personal_history = personal_history or "未提供"
-                    family_history = family_history or "未提供"
-                    st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
-                    st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
-                    st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
+                application_id = parse_application_id(up_excel.name)
+                records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None, GOOGLE_SHEET_GID)
+                matched_row = find_row_by_application_id(records, application_id)
+                personal_history, family_history = extract_medical_histories(matched_row)
+                personal_history = personal_history or "未提供"
+                family_history = family_history or "未提供"
+                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id}")
+                st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
+                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
 
-                    if not items:
-                        st.warning("該檔案中無符合篩選條件的低分項目。")
-                    else:
-                        st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
+                if not items:
+                    st.warning("該檔案中無符合篩選條件的低分項目。")
+                else:
+                    st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
+                
+                final_text = ""
+                progress_bar = st.progress(0)
+                HEADERS = {
+                    "繁體中文": {
+                        "intro": "您的檢測結果【{item}】預防評分為低分。",
+                        "maintenance": "■ 細胞維護：",
+                        "tracking": "■ 主要追蹤項目：",
+                        "nutrition": "■ 細胞營養：",
+                        "supplements": "■ 功能性營養群建議：",
+                        "lifestyle": "■ 生活策略小提醒：",
+                    },
+                    "English": {
+                        "intro": "Your result for 【{item}】 is a low prevention score.",
+                        "maintenance": "■ Cellular maintenance:",
+                        "tracking": "■ Key tracking labs:",
+                        "nutrition": "■ Cellular nutrition:",
+                        "supplements": "■ Functional nutrients & supplements:",
+                        "lifestyle": "■ Lifestyle tips:",
+                    },
+                    "日本語": {
+                        "intro": "検査結果【{item}】は低スコアです。",
+                        "maintenance": "■ 細胞メンテナンス：",
+                        "tracking": "■ 追跡すべき検査項目：",
+                        "nutrition": "■ 細胞栄養：",
+                        "supplements": "■ 栄養補助（サプリ）提案：",
+                        "lifestyle": "■ 生活習慣のヒント：",
+                    },
+                    "한국어": {
+                        "intro": "검사 결과【{item}】의 예방 점수가 낮습니다.",
+                        "maintenance": "■ 세포 유지:",
+                        "tracking": "■ 주요 추적 항목:",
+                        "nutrition": "■ 세포 영양:",
+                        "supplements": "■ 기능성 영양소/보충제 제안:",
+                        "lifestyle": "■ 생활 전략 팁:",
+                    },
+                    "Tiếng Việt": {
+                        "intro": "Kết quả kiểm tra【{item}】có điểm phòng ngừa thấp.",
+                        "maintenance": "■ Duy trì tế bào:",
+                        "tracking": "■ Các chỉ số cần theo dõi:",
+                        "nutrition": "■ Dinh dưỡng tế bào:",
+                        "supplements": "■ Gợi ý dưỡng chất/bổ sung:",
+                        "lifestyle": "■ Mẹo lối sống:",
+                    },
+                }
+                H = HEADERS.get(lang, HEADERS["繁體中文"])
+
+                # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
+                for index, item in enumerate(items):
+                    st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                     
-                    final_text = ""
-                    progress_bar = st.progress(0)
-                    HEADERS = {
-                        "繁體中文": {
-                            "intro": "您的檢測結果【{item}】預防評分為低分。",
-                            "maintenance": "■ 細胞維護：",
-                            "tracking": "■ 主要追蹤項目：",
-                            "nutrition": "■ 細胞營養：",
-                            "supplements": "■ 功能性營養群建議：",
-                            "lifestyle": "■ 生活策略小提醒：",
-                        },
-                        "English": {
-                            "intro": "Your result for 【{item}】 is a low prevention score.",
-                            "maintenance": "■ Cellular maintenance:",
-                            "tracking": "■ Key tracking labs:",
-                            "nutrition": "■ Cellular nutrition:",
-                            "supplements": "■ Functional nutrients & supplements:",
-                            "lifestyle": "■ Lifestyle tips:",
-                        },
-                        "日本語": {
-                            "intro": "検査結果【{item}】は低スコアです。",
-                            "maintenance": "■ 細胞メンテナンス：",
-                            "tracking": "■ 追跡すべき検査項目：",
-                            "nutrition": "■ 細胞栄養：",
-                            "supplements": "■ 栄養補助（サプリ）提案：",
-                            "lifestyle": "■ 生活習慣のヒント：",
-                        },
-                        "한국어": {
-                            "intro": "검사 결과【{item}】의 예방 점수가 낮습니다.",
-                            "maintenance": "■ 세포 유지:",
-                            "tracking": "■ 주요 추적 항목:",
-                            "nutrition": "■ 세포 영양:",
-                            "supplements": "■ 기능성 영양소/보충제 제안:",
-                            "lifestyle": "■ 생활 전략 팁:",
-                        },
-                        "Tiếng Việt": {
-                            "intro": "Kết quả kiểm tra【{item}】có điểm phòng ngừa thấp.",
-                            "maintenance": "■ Duy trì tế bào:",
-                            "tracking": "■ Các chỉ số cần theo dõi:",
-                            "nutrition": "■ Dinh dưỡng tế bào:",
-                            "supplements": "■ Gợi ý dưỡng chất/bổ sung:",
-                            "lifestyle": "■ Mẹo lối sống:",
-                        },
-                    }
-                    H = HEADERS.get(lang, HEADERS["繁體中文"])
+                    pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
+                    generation_limit = max(1, int(word_limit))
+                    budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                    section_min = min_section_length(word_limit)
+                    
+                    # 強化語言要求，確保 AI 看到
+                    user_instruction = f"""
+                    ### IMPORTANT LANGUAGE REQUIREMENT: 
+                    All content in the JSON response MUST be written in {lang}. 
+                    (目前的語言要求：{lang})
 
-                    # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
-                    for index, item in enumerate(items):
-                        st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
-                        
-                        pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
-                        generation_limit = max(1, int(word_limit))
-                        budget_hint = format_budget_hint(build_length_budget(generation_limit))
-                        section_min = min_section_length(word_limit)
-                        
-                        # 強化語言要求，確保 AI 看到
-                        user_instruction = f"""
-                        ### IMPORTANT LANGUAGE REQUIREMENT: 
-                        All content in the JSON response MUST be written in {lang}. 
-                        (目前的語言要求：{lang})
+                    受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                    申請單編號：{application_id}。
+                    個人疾病史：{personal_history}。
+                    家族疾病史：{family_history}。
+                    分析項目：{item}。
+                    字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
+                    生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
+                    各段落字數上限：{budget_hint}。
+                    各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
+                    【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                    
+                    請嚴格回傳 JSON 格式：
+                    {{
+                      "maintenance": "...",
+                      "tracking": "...",
+                      "nutrition": "...",
+                      "supplements": "...",
+                      "lifestyle": "..."
+                    }}
+                    """
+                    
+                    task_prompt = f"""
+                    # LANGUAGE CONSTRAINT (CRITICAL)
+                    - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
+                    - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
+                    - IF {lang} IS "日本語", すべて日本語で回答してください。
+                    - IF {lang} IS "한국어", 한국어로만 작성하세요.
+                    - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
 
-                        受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
-                        申請單編號：{application_id}。
-                        個人疾病史：{personal_history}。
-                        家族疾病史：{family_history}。
-                        分析項目：{item}。
-                        字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
-                        生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
-                        各段落字數上限：{budget_hint}。
-                        各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                        【追蹤項目】：僅限挑選：[{pdf_tests}]。
-                        
-                        請嚴格回傳 JSON 格式：
-                        {{
-                          "maintenance": "...",
-                          "tracking": "...",
-                          "nutrition": "...",
-                          "supplements": "...",
-                          "lifestyle": "..."
-                        }}
-                        """
-                        
-                        task_prompt = f"""
-                        # LANGUAGE CONSTRAINT (CRITICAL)
-                        - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
-                        - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
-                        - IF {lang} IS "日本語", すべて日本語で回答してください。
-                        - IF {lang} IS "한국어", 한국어로만 작성하세요.
-                        - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
+                    # SUBJECT DATA
+                    - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                    - Application ID: {application_id}
+                    - Personal Medical History: {personal_history}
+                    - Family Medical History: {family_history}
+                    - Target Item: {item}
+                    - Word Limit (Hard Max, non-space characters): {word_limit}
+                    - Target Limit (Use This): {generation_limit}
+                    - Section Budgets: {budget_hint}
+                    - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
 
-                        # SUBJECT DATA
-                        - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
-                        - Application ID: {application_id}
-                        - Personal Medical History: {personal_history}
-                        - Family Medical History: {family_history}
-                        - Target Item: {item}
-                        - Word Limit (Hard Max, non-space characters): {word_limit}
-                        - Target Limit (Use This): {generation_limit}
-                        - Section Budgets: {budget_hint}
-                        - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
+                    # REFERENCE DATA (FOR TRACKING SECTION)
+                    - Valid Tracking Items: [{pdf_tests}]
 
-                        # REFERENCE DATA (FOR TRACKING SECTION)
-                        - Valid Tracking Items: [{pdf_tests}]
+                    # RESPONSE FORMAT
+                    Please integrate personal and family medical history into risk interpretation and recommendations.
+                    Please provide the analysis strictly in the following JSON structure:
+                    {{
+                    "maintenance": "...",
+                    "tracking": "...",
+                    "nutrition": "...",
+                    "supplements": "...",
+                    "lifestyle": "..."
+                    }}
+                    """
 
-                        # RESPONSE FORMAT
-                        Please integrate personal and family medical history into risk interpretation and recommendations.
-                        Please provide the analysis strictly in the following JSON structure:
-                        {{
-                        "maintenance": "...",
-                        "tracking": "...",
-                        "nutrition": "...",
-                        "supplements": "...",
-                        "lifestyle": "..."
-                        }}
-                        """
+                    lifestyle_guidance = """
+                    # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
+                    Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
+                    Every tip must be measurable (frequency, duration, timing, or quantity).
+                    Ensure each tip is explicitly connected to the target topic's mechanism.
+                    Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
+                    Each section must include at least 2 sentences and avoid empty headers.
+                    """
 
-                        lifestyle_guidance = """
-                        # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
-                        Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
-                        Every tip must be measurable (frequency, duration, timing, or quantity).
-                        Ensure each tip is explicitly connected to the target topic's mechanism.
-                        Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
-                        Each section must include at least 2 sentences and avoid empty headers.
-                        """
+                    # 2. 使用 system_instruction 分離角色與任務
+                    system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
+                    full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
+                    report = None
+                    failure_reason = ""
+                    output_length = 0
+                    for attempt in range(3):
+                        if attempt == 1:
+                            if output_length > word_limit:
+                                shrink_by = max(10, output_length - word_limit)
+                                generation_limit = max(1, generation_limit - shrink_by)
+                            budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                            section_min = min_section_length(word_limit)
+                            system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
+                            user_instruction = f"""
+                            ### IMPORTANT LANGUAGE REQUIREMENT: 
+                            All content in the JSON response MUST be written in {lang}. 
+                            (目前的語言要求：{lang})
 
-                        # 2. 使用 system_instruction 分離角色與任務
-                        system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
-                        full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
-                        report = None
-                        failure_reason = ""
-                        output_length = 0
-                        for attempt in range(3):
-                            if attempt == 1:
-                                if output_length > word_limit:
-                                    shrink_by = max(10, output_length - word_limit)
-                                    generation_limit = max(1, generation_limit - shrink_by)
-                                budget_hint = format_budget_hint(build_length_budget(generation_limit))
-                                section_min = min_section_length(word_limit)
-                                system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
-                                user_instruction = f"""
-                                ### IMPORTANT LANGUAGE REQUIREMENT: 
-                                All content in the JSON response MUST be written in {lang}. 
-                                (目前的語言要求：{lang})
+                            受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
+                            申請單編號：{application_id}。
+                            個人疾病史：{personal_history}。
+                            家族疾病史：{family_history}。
+                            分析項目：{item}。
+                            字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
+                            生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
+                            各段落字數上限：{budget_hint}。
+                            各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
+                            【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                            
+                            請嚴格回傳 JSON 格式：
+                            {{
+                              "maintenance": "...",
+                              "tracking": "...",
+                              "nutrition": "...",
+                              "supplements": "...",
+                              "lifestyle": "..."
+                            }}
+                            """
+                            task_prompt = f"""
+                            # LANGUAGE CONSTRAINT (CRITICAL)
+                            - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
+                            - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
+                            - IF {lang} IS "日本語", すべて日本語で回答してください。
+                            - IF {lang} IS "한국어", 한국어로만 작성하세요.
+                            - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
 
-                                受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
-                                申請單編號：{application_id}。
-                                個人疾病史：{personal_history}。
-                                家族疾病史：{family_history}。
-                                分析項目：{item}。
-                                字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
-                                生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
-                                各段落字數上限：{budget_hint}。
-                                各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                                【追蹤項目】：僅限挑選：[{pdf_tests}]。
-                                
-                                請嚴格回傳 JSON 格式：
-                                {{
-                                  "maintenance": "...",
-                                  "tracking": "...",
-                                  "nutrition": "...",
-                                  "supplements": "...",
-                                  "lifestyle": "..."
-                                }}
-                                """
-                                task_prompt = f"""
-                                # LANGUAGE CONSTRAINT (CRITICAL)
-                                - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
-                                - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
-                                - IF {lang} IS "日本語", すべて日本語で回答してください。
-                                - IF {lang} IS "한국어", 한국어로만 작성하세요.
-                                - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
+                            # SUBJECT DATA
+                            - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
+                            - Application ID: {application_id}
+                            - Personal Medical History: {personal_history}
+                            - Family Medical History: {family_history}
+                            - Target Item: {item}
+                            - Word Limit (Hard Max, non-space characters): {word_limit}
+                            - Target Limit (Use This): {generation_limit}
+                            - Section Budgets: {budget_hint}
+                            - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
 
-                                # SUBJECT DATA
-                                - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
-                                - Application ID: {application_id}
-                                - Personal Medical History: {personal_history}
-                                - Family Medical History: {family_history}
-                                - Target Item: {item}
-                                - Word Limit (Hard Max, non-space characters): {word_limit}
-                                - Target Limit (Use This): {generation_limit}
-                                - Section Budgets: {budget_hint}
-                                - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
+                            # REFERENCE DATA (FOR TRACKING SECTION)
+                            - Valid Tracking Items: [{pdf_tests}]
 
-                                # REFERENCE DATA (FOR TRACKING SECTION)
-                                - Valid Tracking Items: [{pdf_tests}]
-
-                                # RESPONSE FORMAT
-                                Please integrate personal and family medical history into risk interpretation and recommendations.
-                                Please provide the analysis strictly in the following JSON structure:
-                                {{
-                                "maintenance": "...",
-                                "tracking": "...",
-                                "nutrition": "...",
-                                "supplements": "...",
-                                "lifestyle": "..."
-                                }}
-                                """
-                                full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
-                                full_combined_prompt += (
-                                    f"\n\n# RETRY NOTICE\n"
-                                    f"The previous response was invalid: {failure_reason}.\n"
-                                    f"Please respond again strictly in {lang} and within the target limit.\n"
-                                )
-                            response = client.models.generate_content(
-                                model="models/gemma-3-27b-it",
-                                contents=full_combined_prompt,
-                                config={
-                                    "temperature": 0.3,
-                                    "top_p": 0.95,
-                                }
+                            # RESPONSE FORMAT
+                            Please integrate personal and family medical history into risk interpretation and recommendations.
+                            Please provide the analysis strictly in the following JSON structure:
+                            {{
+                            "maintenance": "...",
+                            "tracking": "...",
+                            "nutrition": "...",
+                            "supplements": "...",
+                            "lifestyle": "..."
+                            }}
+                            """
+                            full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
+                            full_combined_prompt += (
+                                f"\n\n# RETRY NOTICE\n"
+                                f"The previous response was invalid: {failure_reason}.\n"
+                                f"Please respond again strictly in {lang} and within the target limit.\n"
                             )
+                        response = client.models.generate_content(
+                            model="models/gemma-3-27b-it",
+                            contents=full_combined_prompt,
+                            config={
+                                "temperature": 0.3,
+                                "top_p": 0.95,
+                            }
+                        )
 
-                            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                            if not json_match:
-                                failure_reason = "未回傳有效 JSON"
-                                continue
+                        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                        if not json_match:
+                            failure_reason = "未回傳有效 JSON"
+                            continue
 
-                            candidate_report = json.loads(json_match.group(0))
-                            valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit)
-                            if valid:
-                                report = candidate_report
-                                break
+                        candidate_report = json.loads(json_match.group(0))
+                        valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit)
+                        if valid:
+                            report = candidate_report
+                            break
 
-                        if report:
-                            section = H["intro"].format(item=item) + "\n\n"
-                            section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
-                            section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
-                            section += f'{H["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
-                            section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
-                            section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
-                            final_text += section + "="*50 + "\n\n"
-                        else:
-                            st.warning(f"第 {index+1} 項分析失敗：{failure_reason}")
-                        
-                        progress_bar.progress((index + 1) / len(items))
-                        if len(items) > 1:
-                            time.sleep(5) # 避免頻率限制
+                    if report:
+                        section = H["intro"].format(item=item) + "\n\n"
+                        section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
+                        section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
+                        section += f'{H["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
+                        section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
+                        section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
+                        final_text += section + "="*50 + "\n\n"
+                    else:
+                        st.warning(f"第 {index+1} 項分析失敗：{failure_reason}")
+                    
+                    progress_bar.progress((index + 1) / len(items))
+                    if len(items) > 1:
+                        time.sleep(5) # 避免頻率限制
 
-                    st.success("🎉 分析完成！")
-                    st.text_area("結果預覽", final_text, height=400)
-                    st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
+                st.success("🎉 分析完成！")
+                st.text_area("結果預覽", final_text, height=400)
+                st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
 
-            except Exception as e:
-                st.error(f"分析失敗：{e}")
+        except Exception as e:
+            st.error(f"分析失敗：{e}")
 
 
 
