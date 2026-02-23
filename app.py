@@ -440,11 +440,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Valid Tracking Items: [{pdf_tests}]
 
                     # RESPONSE FORMAT
-                    If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
-                    Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
-                    If a status is 「無」 or N/A, do not provide related risk claims or lifestyle advice for that habit.
-                    Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
-                    If the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                    - STRICT: If family history is marked as N/A, do not mention family history at all.
+                    - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                    - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
+                    - STRICT: Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                    - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                    - Focus on mechanisms strictly relevant to the target item.
                     Please provide the analysis strictly in the following JSON structure:
                     {{
                     "maintenance": "...",
@@ -531,11 +532,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Valid Tracking Items: [{pdf_tests}]
 
                             # RESPONSE FORMAT
-                            If family history is marked as N/A, do not mention missing family-history data; simply avoid referencing family history.
-                            Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
-                            If a status is 「無」 or N/A, do not provide related risk claims or lifestyle advice for that habit.
-                            Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
-                            If the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                            - STRICT: If family history is marked as N/A, do not mention family history at all.
+                            - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                            - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
+                            - STRICT: Use only disease-to-gene mappings explicitly defined in the system prompt; do not invent or substitute genes.
+                            - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                            - Focus on mechanisms strictly relevant to the target item.
                             Please provide the analysis strictly in the following JSON structure:
                             {{
                             "maintenance": "...",
