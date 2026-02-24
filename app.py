@@ -182,7 +182,7 @@ def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
         score_val = ws.cell(row=row, column=10).value
         if p_name and score_val is not None:
             try:
-                all_scored_items.append({"name": str(p_name), "score": float(score_val)})
+                all_scored_items.append({"name": str(p_name).strip(), "score": float(score_val)})
             except: continue
 
     # 階層式篩選
@@ -367,6 +367,13 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     "肝臟解毒": "NAT2",
                 }
 
+                # 特定主題的機制防呆
+                TOPIC_MECHANISM_RULES = {
+                    "胃癌": "【強制機制要求】：必須且只能討論「葉酸代謝、DNA 甲基化、黏膜修復」，嚴禁提及「肝臟解毒」、「CYP1A1」、「致癌物代謝」。",
+                    "頭頸癌": "【強制機制要求】：必須且只能討論「黏膜防禦、局部炎症、DNA 穩定性」，嚴禁提及「解毒能力」。",
+                    "大腸直腸癌": "【強制機制要求】：必須聚焦「葉酸代謝、DNA 甲基化、腸道黏膜修復」。",
+                }
+
                 # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
                 for index, item in enumerate(items):
                     st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
@@ -390,20 +397,34 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     habit_lines_zh = []
                     habit_lines_en = []
-                    if smoking_status:
+                    has_bad_habit = False
+
+                    if smoking_status and smoking_status not in ["無", "未提供", "否"]:
                         habit_lines_zh.append(f"抽菸問卷結果：{smoking_status}。")
-                        habit_lines_en.append(f"- Smoking questionnaire result: {smoking_status}")
-                    if drinking_status:
+                        habit_lines_en.append(f"- Smoking questionnaire: {smoking_status}")
+                        has_bad_habit = True
+                    if drinking_status and drinking_status not in ["無", "未提供", "否"]:
                         habit_lines_zh.append(f"喝酒問卷結果：{drinking_status}。")
-                        habit_lines_en.append(f"- Alcohol questionnaire result: {drinking_status}")
-                    if betel_nut_status:
+                        habit_lines_en.append(f"- Alcohol questionnaire: {drinking_status}")
+                        has_bad_habit = True
+                    if betel_nut_status and betel_nut_status not in ["無", "未提供", "否"]:
                         habit_lines_zh.append(f"吃檳榔問卷結果：{betel_nut_status}。")
-                        habit_lines_en.append(f"- Betel nut questionnaire result: {betel_nut_status}")
-                    habit_instruction_zh = "\n                    ".join(habit_lines_zh) if habit_lines_zh else "生活習慣（抽菸/喝酒/吃檳榔）：全部未提供。【絕對禁止】在報告中提及任何與抽菸、喝酒、檳榔相關的風險或建議。"
-                    habit_instruction_en = "\n                    ".join(habit_lines_en) if habit_lines_en else "- Lifestyle Habits (smoking/alcohol/betel nut): ALL NOT PROVIDED. DO NOT mention any smoking, alcohol, or betel nut related advice."
-                    smoking_prompt_value = smoking_status or "N/A"
-                    drinking_prompt_value = drinking_status or "N/A"
-                    betel_prompt_value = betel_nut_status or "N/A"
+                        habit_lines_en.append(f"- Betel nut questionnaire: {betel_nut_status}")
+                        has_bad_habit = True
+
+                    if not has_bad_habit:
+                        habit_instruction_zh = "【生活習慣設定】：此受測者「沒有」或未提供抽菸/喝酒/吃檳榔的習慣。絕對嚴禁在報告中出現「如果您有抽菸/喝酒/嚼檳榔習慣請戒除」、「避免抽菸/喝酒以降低風險」等假設性語句。請將生活建議完全聚焦於「飲食、運動、睡眠」。"
+                        habit_instruction_en = "- Lifestyle Habits: The subject DOES NOT smoke, DOES NOT drink, and DOES NOT chew betel nut. You MUST NOT advise them to quit or reduce smoking/drinking/betel nut. Please focus entirely on diet, exercise, and sleep."
+                    else:
+                        habit_instruction_zh = "\n                    ".join(habit_lines_zh)
+                        habit_instruction_en = "\n                    ".join(habit_lines_en)
+
+                    smoking_prompt_value = smoking_status if (smoking_status and smoking_status not in ["無", "未提供", "否"]) else "N/A"
+                    drinking_prompt_value = drinking_status if (drinking_status and drinking_status not in ["無", "未提供", "否"]) else "N/A"
+                    betel_prompt_value = betel_nut_status if (betel_nut_status and betel_nut_status not in ["無", "未提供", "否"]) else "N/A"
+                    
+                    # 機制防呆注入
+                    mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
 
                     # 強化語言要求，確保 AI 看到
                     user_instruction = f"""
@@ -418,6 +439,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     {habit_instruction_zh}
                     分析項目：{item}。
                     【強制基因指定】：{gene_instruction}
+                    {mechanism_override}
                     【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                     字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                     生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -454,6 +476,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Betel Nut Status (binary): {betel_prompt_value if betel_prompt_value != "N/A" else "None/Not Provided"}
                     - Target Item: {item}
                     - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
+                    - Mechanism Override: {mechanism_override}
                     - TONE: Warm, clinical yet personalized. Use "您" (You) to address the user directly. DO NOT use "受測者" (Subject).
                     - Word Limit (Hard Max, non-space characters): {word_limit}
                     - Target Limit (Use This): {generation_limit}
@@ -516,6 +539,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             {habit_instruction_zh}
                             分析項目：{item}。
                             【強制基因指定】：{gene_instruction}
+                            {mechanism_override}
                             【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                             字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                             生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
@@ -550,6 +574,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Alcohol Status (binary): {drinking_prompt_value}
                             - Betel Nut Status (binary): {betel_prompt_value}
                             - Target Item: {item}
+                            - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
+                            - Mechanism Override: {mechanism_override}
                             - Word Limit (Hard Max, non-space characters): {word_limit}
                             - Target Limit (Use This): {generation_limit}
                             - Section Budgets: {budget_hint}
