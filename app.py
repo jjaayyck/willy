@@ -374,6 +374,26 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     "大腸直腸癌": "【強制機制要求】：必須聚焦「葉酸代謝、DNA 甲基化、腸道黏膜修復」。",
                 }
 
+                # 特定主題的追蹤項目防呆
+                TRACKING_TESTS_MAPPING = {
+                    "胃癌": "【強制追蹤項目】：必須建議追蹤 H. Pylori Ab, CEA, CA-724 (若列表有)。",
+                    "腎臟功能": "【強制追蹤項目】：必須建議追蹤 BUN, Creatinine, eGFR, UA。",
+                    "肝臟解毒": "【強制追蹤項目】：必須建議追蹤 sGOT, sGPT, r-GTP, Alk-P, T-Bilirubin, D-Bilirubin。",
+                    "肝癌": "【強制追蹤項目】：必須建議追蹤 AFP, sGOT, sGPT。",
+                    "肺癌": "【強制追蹤項目】：必須建議追蹤 cyfra 21-1, NSE, SCC, CEA。",
+                    "大腸直腸癌": "【強制追蹤項目】：必須建議追蹤 CEA。",
+                    "乳癌": "【強制追蹤項目】：必須建議追蹤 CA-153, CEA。",
+                    "卵巢癌": "【強制追蹤項目】：必須建議追蹤 CA-125, CEA。",
+                    "前列腺癌": "【強制追蹤項目】：必須建議追蹤 PSA。",
+                    "胰臟癌": "【強制追蹤項目】：必須建議追蹤 CA-199, CEA。",
+                    "頭頸癌": "【強制追蹤項目】：必須建議追蹤 SCC, EBVCA-IgA。",
+                    "中風": "【強制追蹤項目】：必須建議追蹤 Cholesterol, LDL-Cho, HDL-Cho, Triglyceride, HsCRP, Homocysteine。",
+                    "心肌梗塞": "【強制追蹤項目】：必須建議追蹤 CPK, LDH, HsCRP, Homocysteine, LDL-Cho。",
+                    "糖尿病預防": "【強制追蹤項目】：必須建議追蹤 Glucose(Fasting/2hrPC), HbA1c。",
+                    "脂質代謝能力": "【強制追蹤項目】：必須建議追蹤 Cholesterol, LDL-Cho, HDL-Cho, Triglyceride。",
+                    "細胞炎症調控": "【強制追蹤項目】：必須建議追蹤 CRP, HsCRP, WBC。",
+                }
+
                 # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
                 for index, item in enumerate(items):
                     st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
@@ -425,6 +445,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     
                     # 機制防呆注入
                     mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
+                    tracking_override = TRACKING_TESTS_MAPPING.get(item, "")
 
                     # 強化語言要求，確保 AI 看到
                     user_instruction = f"""
@@ -440,12 +461,13 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     分析項目：{item}。
                     【強制基因指定】：{gene_instruction}
                     {mechanism_override}
+                    {tracking_override}
                     【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                     字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                     生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                     各段落字數上限：{budget_hint}。
                     各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                    【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                    【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
                     
                     請嚴格回傳 JSON 格式：
                     {{
@@ -485,6 +507,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     # REFERENCE DATA (FOR TRACKING SECTION)
                     - Valid Tracking Items: [{pdf_tests}]
+                    - REQUIRED TRACKING OVERRIDE: {tracking_override}
 
                     # RESPONSE FORMAT
                     - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
@@ -506,10 +529,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     lifestyle_guidance = """
                     # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
-                    Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
-                    Every tip must be measurable (frequency, duration, timing, or quantity).
-                    Ensure each tip is explicitly connected to the target topic's mechanism.
-                    Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
+                    Provide 4-6 actionable lifestyle tips tailored to the user's age/gender and the target item. Make it as copious and detailed as possible.
+                    EVERY SINGLE TIP MUST STRICTLY FOLLOW THESE RULES:
+                    1. Must be strictly measurable and quantifiable (e.g., "30 minutes of aerobic exercise at heart rate 130 bpm 3 times a week", "drink 2000cc water daily before 8 PM", "sleep 7-8 hours between 11 PM and 7 AM").
+                    2. STRICTLY PROHIBITED to suggest unquantifiable fluff actions like "meditation, deep breathing, doing yoga, relaxing, managing stress, sleeping early, eating well, maintaining a good mood".
+                    3. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
                     Each section must include at least 2 sentences and avoid empty headers.
                     """
 
@@ -540,12 +564,13 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             分析項目：{item}。
                             【強制基因指定】：{gene_instruction}
                             {mechanism_override}
+                            {tracking_override}
                             【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                             字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                             生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                             各段落字數上限：{budget_hint}。
                             各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                            【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                            【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
                             
                             請嚴格回傳 JSON 格式：
                             {{
@@ -583,6 +608,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                             # REFERENCE DATA (FOR TRACKING SECTION)
                             - Valid Tracking Items: [{pdf_tests}]
+                            - REQUIRED TRACKING OVERRIDE: {tracking_override}
 
                             # RESPONSE FORMAT
                             - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
