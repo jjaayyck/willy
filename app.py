@@ -13,6 +13,7 @@ from sheet_utils import (
     normalize_record_keys,
     find_row_by_application_id,
     extract_medical_histories,
+    extract_lifestyle_habits,
 )
 
 # 載入環境變數
@@ -181,7 +182,7 @@ def extract_data_from_upload(uploaded_file, threshold_low=30, threshold_std=37):
         score_val = ws.cell(row=row, column=10).value
         if p_name and score_val is not None:
             try:
-                all_scored_items.append({"name": str(p_name), "score": float(score_val)})
+                all_scored_items.append({"name": str(p_name).strip(), "score": float(score_val)})
             except: continue
 
     # 階層式篩選
@@ -270,6 +271,11 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     st.warning(f"⚠️ Google Sheet 中找不到申請單編號：{application_id}（病史將顯示為未提供）")
 
                 personal_history, family_history = extract_medical_histories(matched_row)
+                lifestyle_habits = extract_lifestyle_habits(matched_row)
+
+                smoking_status = lifestyle_habits.get("smoking", "")
+                drinking_status = lifestyle_habits.get("drinking", "")
+                betel_nut_status = lifestyle_habits.get("betel_nut", "")
 
                 # ===== 診斷輸出（debug，確認後可移除）=====
                 st.write(f"🔍 DEBUG: personal_history = '{personal_history}'")
@@ -277,10 +283,23 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 # ===== 診斷輸出結束 =====
 
                 personal_history = personal_history or "未提供"
-                family_history = family_history or "未提供"
+                family_history = family_history or ""
+                smoking_status = smoking_status or ""
+                drinking_status = drinking_status or ""
+                betel_nut_status = betel_nut_status or ""
+                has_family_history = bool(family_history)
                 st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id or '（無法解析）'}")
                 st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
-                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_history}")
+                habit_display_parts = []
+                if smoking_status:
+                    habit_display_parts.append(f"抽菸：{smoking_status}")
+                if drinking_status:
+                    habit_display_parts.append(f"喝酒：{drinking_status}")
+                if betel_nut_status:
+                    habit_display_parts.append(f"吃檳榔：{betel_nut_status}")
+                habit_display = "｜".join(habit_display_parts) if habit_display_parts else "（未提供）"
+                family_display = family_history if has_family_history else "（不參考）"
+                st.info(f"個人疾病史：{personal_history}｜家族疾病史：{family_display}｜生活習慣：{habit_display}")
 
                 if not items:
                     st.warning("該檔案中無符合篩選條件的低分項目。")
@@ -333,15 +352,101 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 }
                 H = HEADERS.get(lang, HEADERS["繁體中文"])
 
+                # 【強效機制】：手動定義關鍵主題與基因的對應關係，避免 AI 混淆
+                CRITICAL_GENE_MAPPING = {
+                    "胃癌": "MTHFR",
+                    "大腸直腸癌": "MTHFR",
+                    "卵巢癌": "MTHFR",
+                    "前列腺癌": "MTHFR",
+                    "頭頸癌": "CYP1A1",
+                    "肝癌": "CYP1A1",
+                    "肺癌": "EGF",
+                    "乳癌": "BRCA1",
+                    "子宮內膜癌": "MDM2",
+                    "胰臟癌": "TERT",
+                    "肝臟解毒": "NAT2",
+                }
+
+                # 特定主題的機制防呆
+                TOPIC_MECHANISM_RULES = {
+                    "胃癌": "【強制機制要求】：必須且只能討論「葉酸代謝、DNA 甲基化、黏膜修復」，嚴禁提及「肝臟解毒」、「CYP1A1」、「致癌物代謝」。",
+                    "頭頸癌": "【強制機制要求】：必須且只能討論「黏膜防禦、局部炎症、DNA 穩定性」，嚴禁提及「解毒能力」。",
+                    "大腸直腸癌": "【強制機制要求】：必須聚焦「葉酸代謝、DNA 甲基化、腸道黏膜修復」。",
+                }
+
+                # 特定主題的追蹤項目防呆
+                TRACKING_TESTS_MAPPING = {
+                    "胃癌": "【強制追蹤項目】：必須建議追蹤 H. Pylori Ab, CEA, CA-724 (若列表有)。",
+                    "腎臟功能": "【強制追蹤項目】：必須建議追蹤 BUN, Creatinine, eGFR, UA。",
+                    "肝臟解毒": "【強制追蹤項目】：必須建議追蹤 sGOT, sGPT, r-GTP, Alk-P, T-Bilirubin, D-Bilirubin。",
+                    "肝癌": "【強制追蹤項目】：必須建議追蹤 AFP, sGOT, sGPT。",
+                    "肺癌": "【強制追蹤項目】：必須建議追蹤 cyfra 21-1, NSE, SCC, CEA。",
+                    "大腸直腸癌": "【強制追蹤項目】：必須建議追蹤 CEA。",
+                    "乳癌": "【強制追蹤項目】：必須建議追蹤 CA-153, CEA。",
+                    "卵巢癌": "【強制追蹤項目】：必須建議追蹤 CA-125, CEA。",
+                    "前列腺癌": "【強制追蹤項目】：必須建議追蹤 PSA。",
+                    "胰臟癌": "【強制追蹤項目】：必須建議追蹤 CA-199, CEA。",
+                    "頭頸癌": "【強制追蹤項目】：必須建議追蹤 SCC, EBVCA-IgA。",
+                    "中風": "【強制追蹤項目】：必須建議追蹤 Cholesterol, LDL-Cho, HDL-Cho, Triglyceride, HsCRP, Homocysteine。",
+                    "心肌梗塞": "【強制追蹤項目】：必須建議追蹤 CPK, LDH, HsCRP, Homocysteine, LDL-Cho。",
+                    "糖尿病預防": "【強制追蹤項目】：必須建議追蹤 Glucose(Fasting/2hrPC), HbA1c。",
+                    "脂質代謝能力": "【強制追蹤項目】：必須建議追蹤 Cholesterol, LDL-Cho, HDL-Cho, Triglyceride。",
+                    "細胞炎症調控": "【強制追蹤項目】：必須建議追蹤 CRP, HsCRP, WBC。",
+                }
+
                 # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
                 for index, item in enumerate(items):
                     st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                     
+                    # 獲取手動指定的基因（如果有）
+                    manual_gene = CRITICAL_GENE_MAPPING.get(item, "")
+                    gene_instruction = f"本項目對應的主要基因必須為：{manual_gene}。" if manual_gene else "請依據提示詞中的對應表選取正確基因。"
+                    gene_instruction_en = f"The primary gene for this topic MUST be: {manual_gene}." if manual_gene else "Select the correct gene based on the mapping table in the system prompt."
+
                     pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                     generation_limit = max(1, int(word_limit))
                     budget_hint = format_budget_hint(build_length_budget(generation_limit))
                     section_min = min_section_length(word_limit)
                     
+                    family_history_instruction_zh = (
+                        f"家族疾病史：{family_history}。" if has_family_history else "家族疾病史：不參考。"
+                    )
+                    family_history_instruction_en = (
+                        f"- Family Medical History: {family_history}" if has_family_history else "- Family Medical History: N/A (do not reference family history)"
+                    )
+
+                    habit_lines_zh = []
+                    habit_lines_en = []
+                    has_bad_habit = False
+
+                    if smoking_status and smoking_status not in ["無", "未提供", "否"]:
+                        habit_lines_zh.append(f"抽菸問卷結果：{smoking_status}。")
+                        habit_lines_en.append(f"- Smoking questionnaire: {smoking_status}")
+                        has_bad_habit = True
+                    if drinking_status and drinking_status not in ["無", "未提供", "否"]:
+                        habit_lines_zh.append(f"喝酒問卷結果：{drinking_status}。")
+                        habit_lines_en.append(f"- Alcohol questionnaire: {drinking_status}")
+                        has_bad_habit = True
+                    if betel_nut_status and betel_nut_status not in ["無", "未提供", "否"]:
+                        habit_lines_zh.append(f"吃檳榔問卷結果：{betel_nut_status}。")
+                        habit_lines_en.append(f"- Betel nut questionnaire: {betel_nut_status}")
+                        has_bad_habit = True
+
+                    if not has_bad_habit:
+                        habit_instruction_zh = "【生活習慣設定】：此受測者「沒有」或未提供抽菸/喝酒/吃檳榔的習慣。絕對嚴禁在報告中出現「如果您有抽菸/喝酒/嚼檳榔習慣請戒除」、「避免抽菸/喝酒以降低風險」等假設性語句。請將生活建議完全聚焦於「飲食、運動、睡眠」。"
+                        habit_instruction_en = "- Lifestyle Habits: The subject DOES NOT smoke, DOES NOT drink, and DOES NOT chew betel nut. You MUST NOT advise them to quit or reduce smoking/drinking/betel nut. Please focus entirely on diet, exercise, and sleep."
+                    else:
+                        habit_instruction_zh = "\n                    ".join(habit_lines_zh)
+                        habit_instruction_en = "\n                    ".join(habit_lines_en)
+
+                    smoking_prompt_value = smoking_status if (smoking_status and smoking_status not in ["無", "未提供", "否"]) else "N/A"
+                    drinking_prompt_value = drinking_status if (drinking_status and drinking_status not in ["無", "未提供", "否"]) else "N/A"
+                    betel_prompt_value = betel_nut_status if (betel_nut_status and betel_nut_status not in ["無", "未提供", "否"]) else "N/A"
+                    
+                    # 機制防呆注入
+                    mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
+                    tracking_override = TRACKING_TESTS_MAPPING.get(item, "")
+
                     # 強化語言要求，確保 AI 看到
                     user_instruction = f"""
                     ### IMPORTANT LANGUAGE REQUIREMENT: 
@@ -351,13 +456,18 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                     申請單編號：{application_id}。
                     個人疾病史：{personal_history}。
-                    家族疾病史：{family_history}。
+                    {family_history_instruction_zh}
+                    {habit_instruction_zh}
                     分析項目：{item}。
+                    【強制基因指定】：{gene_instruction}
+                    {mechanism_override}
+                    {tracking_override}
+                    【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                     字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                     生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                     各段落字數上限：{budget_hint}。
                     各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                    【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                    【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
                     
                     請嚴格回傳 JSON 格式：
                     {{
@@ -381,8 +491,15 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                     - Application ID: {application_id}
                     - Personal Medical History: {personal_history}
-                    - Family Medical History: {family_history}
+                    {family_history_instruction_en}
+                    {habit_instruction_en}
+                    - Smoking Status (binary): {smoking_prompt_value if smoking_prompt_value != "N/A" else "None/Not Provided"}
+                    - Alcohol Status (binary): {drinking_prompt_value if drinking_prompt_value != "N/A" else "None/Not Provided"}
+                    - Betel Nut Status (binary): {betel_prompt_value if betel_prompt_value != "N/A" else "None/Not Provided"}
                     - Target Item: {item}
+                    - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
+                    - Mechanism Override: {mechanism_override}
+                    - TONE: Warm, clinical yet personalized. Use "您" (You) to address the user directly. DO NOT use "受測者" (Subject).
                     - Word Limit (Hard Max, non-space characters): {word_limit}
                     - Target Limit (Use This): {generation_limit}
                     - Section Budgets: {budget_hint}
@@ -390,9 +507,16 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     # REFERENCE DATA (FOR TRACKING SECTION)
                     - Valid Tracking Items: [{pdf_tests}]
+                    - REQUIRED TRACKING OVERRIDE: {tracking_override}
 
                     # RESPONSE FORMAT
-                    Please integrate personal and family medical history into risk interpretation and recommendations.
+                    - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
+                    - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
+                    - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                    - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
+                    - STRICT: {gene_instruction_en}
+                    - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                    - Focus on mechanisms strictly relevant to the target item.
                     Please provide the analysis strictly in the following JSON structure:
                     {{
                     "maintenance": "...",
@@ -405,10 +529,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     lifestyle_guidance = """
                     # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
-                    Provide 3-6 actionable lifestyle tips tailored to the user's age/gender and the target item.
-                    Every tip must be measurable (frequency, duration, timing, or quantity).
-                    Ensure each tip is explicitly connected to the target topic's mechanism.
-                    Avoid vague or non-quantifiable items (e.g., meditation, deep breathing, "sleep early").
+                    Provide 4-6 actionable lifestyle tips tailored to the user's age/gender and the target item. Make it as copious and detailed as possible.
+                    EVERY SINGLE TIP MUST STRICTLY FOLLOW THESE RULES:
+                    1. Must be strictly measurable and quantifiable (e.g., "30 minutes of aerobic exercise at heart rate 130 bpm 3 times a week", "drink 2000cc water daily before 8 PM", "sleep 7-8 hours between 11 PM and 7 AM").
+                    2. STRICTLY PROHIBITED to suggest unquantifiable fluff actions like "meditation, deep breathing, doing yoga, relaxing, managing stress, sleeping early, eating well, maintaining a good mood".
+                    3. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
+                    4. DEDUPLICATION & CONSISTENCY: Ensure all tips are mutually exclusive and logically consistent. DO NOT provide multiple contradictory tips for the same daily habit (e.g., do not suggest drinking water before 8 PM in one tip and before 3 PM in another). Merge or choose the most appropriate single metric for any given habit type (water, sleep, exercise).
                     Each section must include at least 2 sentences and avoid empty headers.
                     """
 
@@ -434,13 +560,18 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
                             申請單編號：{application_id}。
                             個人疾病史：{personal_history}。
-                            家族疾病史：{family_history}。
+                            {family_history_instruction_zh}
+                            {habit_instruction_zh}
                             分析項目：{item}。
+                            【強制基因指定】：{gene_instruction}
+                            {mechanism_override}
+                            {tracking_override}
+                            【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
                             字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
                             生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
                             各段落字數上限：{budget_hint}。
                             各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                            【追蹤項目】：僅限挑選：[{pdf_tests}]。
+                            【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
                             
                             請嚴格回傳 JSON 格式：
                             {{
@@ -463,8 +594,14 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
                             - Application ID: {application_id}
                             - Personal Medical History: {personal_history}
-                            - Family Medical History: {family_history}
+                            {family_history_instruction_en}
+                            {habit_instruction_en}
+                            - Smoking Status (binary): {smoking_prompt_value}
+                            - Alcohol Status (binary): {drinking_prompt_value}
+                            - Betel Nut Status (binary): {betel_prompt_value}
                             - Target Item: {item}
+                            - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
+                            - Mechanism Override: {mechanism_override}
                             - Word Limit (Hard Max, non-space characters): {word_limit}
                             - Target Limit (Use This): {generation_limit}
                             - Section Budgets: {budget_hint}
@@ -472,9 +609,16 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                             # REFERENCE DATA (FOR TRACKING SECTION)
                             - Valid Tracking Items: [{pdf_tests}]
+                            - REQUIRED TRACKING OVERRIDE: {tracking_override}
 
                             # RESPONSE FORMAT
-                            Please integrate personal and family medical history into risk interpretation and recommendations.
+                            - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
+                            - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
+                            - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
+                            - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
+                            - STRICT: {gene_instruction_en}
+                            - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
+                            - Focus on mechanisms strictly relevant to the target item.
                             Please provide the analysis strictly in the following JSON structure:
                             {{
                             "maintenance": "...",
@@ -531,6 +675,3 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
-
-
-
