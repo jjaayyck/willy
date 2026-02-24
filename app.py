@@ -534,6 +534,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     1. Must be strictly measurable and quantifiable (e.g., "30 minutes of aerobic exercise at heart rate 130 bpm 3 times a week", "drink 2000cc water daily before 8 PM", "sleep 7-8 hours between 11 PM and 7 AM").
                     2. STRICTLY PROHIBITED to suggest unquantifiable fluff actions like "meditation, deep breathing, doing yoga, relaxing, managing stress, sleeping early, eating well, maintaining a good mood".
                     3. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
+                    4. DEDUPLICATION & CONSISTENCY: Ensure all tips are mutually exclusive and logically consistent. DO NOT provide multiple contradictory tips for the same daily habit (e.g., do not suggest drinking water before 8 PM in one tip and before 3 PM in another). Merge or choose the most appropriate single metric for any given habit type (water, sleep, exercise).
                     Each section must include at least 2 sentences and avoid empty headers.
                     """
 
