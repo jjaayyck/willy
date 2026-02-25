@@ -447,29 +447,33 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
                     tracking_override = TRACKING_TESTS_MAPPING.get(item, "")
 
-                    # 強化語言要求，確保 AI 看到
-                    user_instruction = f"""
-                    ### IMPORTANT LANGUAGE REQUIREMENT: 
-                    All content in the JSON response MUST be written in {lang}. 
-                    (目前的語言要求：{lang})
-
-                    受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
-                    申請單編號：{application_id}。
-                    個人疾病史：{personal_history}。
-                    {family_history_instruction_zh}
-                    {habit_instruction_zh}
-                    分析項目：{item}。
-                    【強制基因指定】：{gene_instruction}
-                    {mechanism_override}
-                    {tracking_override}
-                    【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
-                    字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
-                    生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
-                    各段落字數上限：{budget_hint}。
-                    各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                    【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
+                    core_prompt = f"""
+                    # CRITICAL REQUIREMENTS
+                    - RESPOND EXCLUSIVELY IN: {lang} (NO CHINESE if English)
+                    - TONE: Warm, clinical. Use "您" (You) strictly. NEVER use "受測者".
                     
-                    請嚴格回傳 JSON 格式：
+                    # SUBJECT DATA
+                    - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}, ID: {application_id}
+                    - Medical/Family: {personal_history} | {family_history_instruction_en}
+                    - Habits: {smoking_prompt_value} (Smoke), {drinking_prompt_value} (Drink), {betel_prompt_value} (Betel)
+                    {habit_instruction_en}
+                    
+                    # TARGET
+                    - Item: {item}
+                    - Gene (FORCED): {manual_gene if manual_gene else "Use prompt table"}
+                    - Override: {mechanism_override}
+                    
+                    # CONSTRAINTS
+                    - Goal Max Limit: {generation_limit} non-space characters
+                    - Section Limits: {budget_hint} (Min. {section_min} / section, >=2 sentences)
+                    - Track Labs: Pick from [{pdf_tests}]. MUST INCLUDE: {tracking_override}
+                    
+                    # LIFESTYLE RULES
+                    1. 4-6 highly detailed, strictly quantifiable proactive tips ("30 min aerobic 130bpm 3x/week", "sleep 7-8 hrs 11PM-7AM").
+                    2. PROHIBITED: Vague fluff (meditation, relax, stress focus) OR avoidance of irrelevant passive risks (second-hand smoke/pollution, unless they actually smoke).
+                    3. Ensure tips combat {item} mechanisms specifically. Do NOT contradict metrics across tips (e.g. pick ONE water target).
+
+                    Please output ONLY valid JSON format:
                     {{
                       "maintenance": "...",
                       "tracking": "...",
@@ -478,70 +482,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                       "lifestyle": "..."
                     }}
                     """
-                    
-                    task_prompt = f"""
-                    # LANGUAGE CONSTRAINT (CRITICAL)
-                    - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
-                    - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
-                    - IF {lang} IS "日本語", すべて日本語で回答してください。
-                    - IF {lang} IS "한국어", 한국어로만 작성하세요.
-                    - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
 
-                    # SUBJECT DATA
-                    - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
-                    - Application ID: {application_id}
-                    - Personal Medical History: {personal_history}
-                    {family_history_instruction_en}
-                    {habit_instruction_en}
-                    - Smoking Status (binary): {smoking_prompt_value if smoking_prompt_value != "N/A" else "None/Not Provided"}
-                    - Alcohol Status (binary): {drinking_prompt_value if drinking_prompt_value != "N/A" else "None/Not Provided"}
-                    - Betel Nut Status (binary): {betel_prompt_value if betel_prompt_value != "N/A" else "None/Not Provided"}
-                    - Target Item: {item}
-                    - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
-                    - Mechanism Override: {mechanism_override}
-                    - TONE: Warm, clinical yet personalized. Use "您" (You) to address the user directly. DO NOT use "受測者" (Subject).
-                    - Word Limit (Hard Max, non-space characters): {word_limit}
-                    - Target Limit (Use This): {generation_limit}
-                    - Section Budgets: {budget_hint}
-                    - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
-
-                    # REFERENCE DATA (FOR TRACKING SECTION)
-                    - Valid Tracking Items: [{pdf_tests}]
-                    - REQUIRED TRACKING OVERRIDE: {tracking_override}
-
-                    # RESPONSE FORMAT
-                    - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
-                    - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
-                    - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
-                    - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
-                    - STRICT: {gene_instruction_en}
-                    - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
-                    - Focus on mechanisms strictly relevant to the target item.
-                    Please provide the analysis strictly in the following JSON structure:
-                    {{
-                    "maintenance": "...",
-                    "tracking": "...",
-                    "nutrition": "...",
-                    "supplements": "...",
-                    "lifestyle": "..."
-                    }}
-                    """
-
-                    lifestyle_guidance = """
-                    # LIFESTYLE GUIDANCE (TOPIC-ALIGNED, QUANTIFIABLE)
-                    Provide 4-6 actionable lifestyle tips tailored to the user's age/gender and the target item. Make it as copious and detailed as possible.
-                    EVERY SINGLE TIP MUST STRICTLY FOLLOW THESE RULES:
-                    1. Must be strictly measurable and quantifiable (e.g., "30 minutes of aerobic exercise at heart rate 130 bpm 3 times a week", "drink 2000cc water daily before 8 PM", "sleep 7-8 hours between 11 PM and 7 AM").
-                    2. STRICTLY PROHIBITED to suggest unquantifiable fluff actions like "meditation, deep breathing, doing yoga, relaxing, managing stress, sleeping early, eating well, maintaining a good mood".
-                    3. STRICTLY PROHIBITED to suggest "avoiding" passive environmental factors if they are irrelevant/assumed (like "avoiding second-hand smoke", "avoiding air pollution", "avoiding chemical exposure"). All tips must be PROACTIVE actions (e.g., eat X, do Y exercise, sleep Z hours).
-                    4. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
-                    5. DEDUPLICATION & CONSISTENCY: Ensure all tips are mutually exclusive and logically consistent. DO NOT provide multiple contradictory tips for the same daily habit (e.g., do not suggest drinking water before 8 PM in one tip and before 3 PM in another). Merge or choose the most appropriate single metric for any given habit type (water, sleep, exercise).
-                    Each section must include at least 2 sentences and avoid empty headers.
-                    """
-
-                    # 2. 使用 system_instruction 分離角色與任務
                     system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
-                    full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
+                    full_combined_prompt = f"{system_prompt}\n\n{core_prompt}"
+                    
                     report = None
                     failure_reason = ""
                     output_length = 0
@@ -553,83 +497,16 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             budget_hint = format_budget_hint(build_length_budget(generation_limit))
                             section_min = min_section_length(word_limit)
                             system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
-                            user_instruction = f"""
-                            ### IMPORTANT LANGUAGE REQUIREMENT: 
-                            All content in the JSON response MUST be written in {lang}. 
-                            (目前的語言要求：{lang})
-
-                            受試者資料：{user_info.get('gender')}/{user_info.get('age')}歲。
-                            申請單編號：{application_id}。
-                            個人疾病史：{personal_history}。
-                            {family_history_instruction_zh}
-                            {habit_instruction_zh}
-                            分析項目：{item}。
-                            【強制基因指定】：{gene_instruction}
-                            {mechanism_override}
-                            {tracking_override}
-                            【稱謂規則】：必須使用「您」來稱呼使用者，嚴禁使用「受測者」。
-                            字數限制：{word_limit} 字（以非空白字元計算，請先規劃字數，再產生內容）。
-                            生成目標字數：{generation_limit} 字內（需低於或等於字數限制）。
-                            各段落字數上限：{budget_hint}。
-                            各段落最少字數：{section_min} 字（非空白字元），每段至少 2 句。
-                            【追蹤項目】：從這份清單中挑選 [{pdf_tests}]，但請優先遵守【強制追蹤項目】的要求。
                             
-                            請嚴格回傳 JSON 格式：
-                            {{
-                              "maintenance": "...",
-                              "tracking": "...",
-                              "nutrition": "...",
-                              "supplements": "...",
-                              "lifestyle": "..."
-                            }}
+                            core_prompt_retry = f"""
+                            # RETRY - REDUCE LENGTH & OBEY CONSTRAINTS
+                            - Item: {item}
+                            - Limits: {generation_limit} MAX chars, budgets: {budget_hint}, min {section_min}/section.
+                            - Lang: {lang}
+                            - Target Gene: {manual_gene} | Override: {mechanism_override}
+                            - Must use valid JSON format.
                             """
-                            task_prompt = f"""
-                            # LANGUAGE CONSTRAINT (CRITICAL)
-                            - YOU MUST RESPOND EXCLUSIVELY IN: {lang}
-                            - IF {lang} IS "English", DO NOT USE ANY CHINESE CHARACTERS.
-                            - IF {lang} IS "日本語", すべて日本語で回答してください。
-                            - IF {lang} IS "한국어", 한국어로만 작성하세요.
-                            - IF {lang} IS "Tiếng Việt", chỉ trả lời bằng tiếng Việt.
-
-                            # SUBJECT DATA
-                            - Gender/Age: {user_info.get('gender')}/{user_info.get('age')}
-                            - Application ID: {application_id}
-                            - Personal Medical History: {personal_history}
-                            {family_history_instruction_en}
-                            {habit_instruction_en}
-                            - Smoking Status (binary): {smoking_prompt_value}
-                            - Alcohol Status (binary): {drinking_prompt_value}
-                            - Betel Nut Status (binary): {betel_prompt_value}
-                            - Target Item: {item}
-                            - Target Gene (FORCED): {manual_gene if manual_gene else "Use table"}
-                            - Mechanism Override: {mechanism_override}
-                            - Word Limit (Hard Max, non-space characters): {word_limit}
-                            - Target Limit (Use This): {generation_limit}
-                            - Section Budgets: {budget_hint}
-                            - Minimum Per Section: {section_min} (non-space characters), at least 2 sentences each
-
-                            # REFERENCE DATA (FOR TRACKING SECTION)
-                            - Valid Tracking Items: [{pdf_tests}]
-                            - REQUIRED TRACKING OVERRIDE: {tracking_override}
-
-                            # RESPONSE FORMAT
-                            - TONE: Use "您" (You) exclusively. NEVER use "受測者" (Subject).
-                            - STRICT: If family history is marked as N/A or "不參考", DO NOT mention family history at all.
-                            - STRICT: Mention smoking/alcohol/betel nut ONLY when the corresponding status is 「有」.
-                            - STRICT: If a habit is 「無」, "N/A", or empty, DO NOT provide related risk claims or lifestyle advice for that habit. 
-                            - STRICT: {gene_instruction_en}
-                            - IF the target item has no explicit gene mapping in the system prompt, avoid naming any gene.
-                            - Focus on mechanisms strictly relevant to the target item.
-                            Please provide the analysis strictly in the following JSON structure:
-                            {{
-                            "maintenance": "...",
-                            "tracking": "...",
-                            "nutrition": "...",
-                            "supplements": "...",
-                            "lifestyle": "..."
-                            }}
-                            """
-                            full_combined_prompt = f"{system_prompt}\n\n{user_instruction}\n\n{task_prompt}\n\n{lifestyle_guidance}"
+                            full_combined_prompt = f"{system_prompt}\n\n{core_prompt}\n{core_prompt_retry}"
                             full_combined_prompt += (
                                 f"\n\n# RETRY NOTICE\n"
                                 f"The previous response was invalid: {failure_reason}.\n"
@@ -668,7 +545,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     
                     progress_bar.progress((index + 1) / len(items))
                     if len(items) > 1:
-                        time.sleep(5) # 避免頻率限制
+                        time.sleep(15) # 避免頻率限制
 
                 st.success("🎉 分析完成！")
                 st.text_area("結果預覽", final_text, height=400)
