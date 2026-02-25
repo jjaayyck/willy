@@ -433,8 +433,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         has_bad_habit = True
 
                     if not has_bad_habit:
-                        habit_instruction_zh = "【生活習慣設定】：此受測者「沒有」或未提供抽菸/喝酒/吃檳榔的習慣。絕對嚴禁在報告中出現「如果您有抽菸/喝酒/嚼檳榔習慣請戒除」、「避免抽菸/喝酒以降低風險」等假設性語句。請將生活建議完全聚焦於「飲食、運動、睡眠」。"
-                        habit_instruction_en = "- Lifestyle Habits: The subject DOES NOT smoke, DOES NOT drink, and DOES NOT chew betel nut. You MUST NOT advise them to quit or reduce smoking/drinking/betel nut. Please focus entirely on diet, exercise, and sleep."
+                        habit_instruction_zh = "【生活習慣設定】：此受測者「沒有」或未提供抽菸/喝酒/吃檳榔的習慣。絕對嚴禁在報告中出現「如果您有抽菸/喝酒/嚼檳榔習慣請戒除」、「避免抽菸/喝酒以降低風險」、「避免暴露於二手菸環境」等假設性語句。請將生活建議完全聚焦於「主動的飲食、運動、睡眠行為」。"
+                        habit_instruction_en = "- Lifestyle Habits: The subject DOES NOT smoke, DOES NOT drink, and DOES NOT chew betel nut. You MUST NOT advise them to quit or reduce smoking/drinking/betel nut, and MUST NOT advise them to avoid second-hand smoke. Please focus entirely on proactive diet, exercise, and sleep habits."
                     else:
                         habit_instruction_zh = "\n                    ".join(habit_lines_zh)
                         habit_instruction_en = "\n                    ".join(habit_lines_en)
@@ -533,8 +533,9 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     EVERY SINGLE TIP MUST STRICTLY FOLLOW THESE RULES:
                     1. Must be strictly measurable and quantifiable (e.g., "30 minutes of aerobic exercise at heart rate 130 bpm 3 times a week", "drink 2000cc water daily before 8 PM", "sleep 7-8 hours between 11 PM and 7 AM").
                     2. STRICTLY PROHIBITED to suggest unquantifiable fluff actions like "meditation, deep breathing, doing yoga, relaxing, managing stress, sleeping early, eating well, maintaining a good mood".
-                    3. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
-                    4. DEDUPLICATION & CONSISTENCY: Ensure all tips are mutually exclusive and logically consistent. DO NOT provide multiple contradictory tips for the same daily habit (e.g., do not suggest drinking water before 8 PM in one tip and before 3 PM in another). Merge or choose the most appropriate single metric for any given habit type (water, sleep, exercise).
+                    3. STRICTLY PROHIBITED to suggest "avoiding" passive environmental factors if they are irrelevant/assumed (like "avoiding second-hand smoke", "avoiding air pollution", "avoiding chemical exposure"). All tips must be PROACTIVE actions (e.g., eat X, do Y exercise, sleep Z hours).
+                    4. Each tip must mathematically or logically combat the risks associated with the target topic mechanism.
+                    5. DEDUPLICATION & CONSISTENCY: Ensure all tips are mutually exclusive and logically consistent. DO NOT provide multiple contradictory tips for the same daily habit (e.g., do not suggest drinking water before 8 PM in one tip and before 3 PM in another). Merge or choose the most appropriate single metric for any given habit type (water, sleep, exercise).
                     Each section must include at least 2 sentences and avoid empty headers.
                     """
 
