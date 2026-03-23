@@ -60,6 +60,20 @@ def is_language_valid(text: str, lang: str) -> bool:
 def count_output_length(text: str, lang: str) -> int:
     return len(re.findall(r"\S", text))
 
+def truncate_to_non_space_limit(text: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    non_space_count = 0
+    chars = []
+    for ch in str(text):
+        if not ch.isspace():
+            non_space_count += 1
+            if non_space_count > limit:
+                break
+        chars.append(ch)
+    truncated = "".join(chars).strip()
+    return truncated + "…" if truncated and non_space_count > limit else truncated
+
 def normalize_report_value(value) -> str:
     if value is None:
         return ""
@@ -76,7 +90,7 @@ def normalize_report_value(value) -> str:
 def min_section_length(word_limit: int) -> int:
     return max(20, int(word_limit * 0.03))
 
-def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bool, str, int]:
+def validate_report_output(report: dict, lang: str, word_limit: int, strict_length: bool = False) -> tuple[bool, str, int]:
     combined_text = " ".join(normalize_report_value(v) for v in report.values())
     if not is_language_valid(combined_text, lang):
         return False, "語言不符合選擇", count_output_length(combined_text, lang)
@@ -91,8 +105,19 @@ def validate_report_output(report: dict, lang: str, word_limit: int) -> tuple[bo
             return False, f"{key} 欄位內容過短", count_output_length(combined_text, lang)
     length = count_output_length(combined_text, lang)
     if length > word_limit:
-        return False, f"超過字數限制（{length}/{word_limit}）", length
+        if strict_length:
+            return False, f"超過字數限制（{length}/{word_limit}）", length
+        return True, f"超過字數限制（{length}/{word_limit}），將自動壓縮", length
     return True, "", length
+
+def enforce_report_length(report: dict, word_limit: int, lang: str) -> tuple[dict, int]:
+    budget = build_length_budget(word_limit)
+    adjusted = {}
+    for key in ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]:
+        section_text = normalize_report_value(report.get(key))
+        adjusted[key] = truncate_to_non_space_limit(section_text, budget[key]).strip()
+    total_length = count_output_length(" ".join(adjusted.values()), lang)
+    return adjusted, total_length
 
 def build_length_budget(word_limit: int) -> dict:
     weights = {
@@ -216,7 +241,7 @@ with st.sidebar:
     api_key_val = os.getenv("GEMINI_API_KEY", "")
     api_key = st.text_input("Gemini API Key", type="password", value=api_key_val)
     lang = st.selectbox("輸出語言", ["繁體中文", "English", "日本語", "한국어", "Tiếng Việt"], index=0)
-    word_limit = st.number_input("字數限制", value=800)
+    word_limit = st.number_input("每個項目的字數限制", value=800)
 
 # 【修改點 1】：移除提示詞上傳區，僅保留 Excel 上傳
 up_excel = st.file_uploader("上傳檢測 Excel 檔案", type=["xlsx"])
@@ -308,6 +333,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 
                 final_text = ""
                 progress_bar = st.progress(0)
+                live_result_container = st.container()
                 HEADERS = {
                     "繁體中文": {
                         "intro": "您的檢測結果【{item}】預防評分為低分。",
@@ -527,12 +553,13 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             continue
 
                         candidate_report = json.loads(json_match.group(0))
-                        valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit)
+                        valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit, strict_length=False)
                         if valid:
                             report = candidate_report
                             break
 
                     if report:
+                        report, adjusted_length = enforce_report_length(report, word_limit, lang)
                         section = H["intro"].format(item=item) + "\n\n"
                         section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
                         section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
@@ -540,6 +567,14 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
                         section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
                         final_text += section + "="*50 + "\n\n"
+                        with live_result_container:
+                            st.markdown(f"### ✅ 第 {index+1}/{len(items)} 項完成：{item}")
+                            st.text(section)
+                        if output_length > word_limit:
+                            st.info(
+                                f"第 {index+1} 項原始字數 {output_length} 超過限制 {word_limit}，"
+                                f"已自動壓縮至約 {adjusted_length} 字。"
+                            )
                     else:
                         st.warning(f"第 {index+1} 項分析失敗：{failure_reason}")
                     
