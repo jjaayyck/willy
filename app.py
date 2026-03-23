@@ -88,7 +88,10 @@ def normalize_report_value(value) -> str:
     return str(value)
 
 def min_section_length(word_limit: int) -> int:
-    return max(20, int(word_limit * 0.03))
+    return max(40, int(word_limit * 0.08))
+
+def min_total_length(word_limit: int) -> int:
+    return max(280, int(word_limit * 0.85))
 
 def validate_report_output(report: dict, lang: str, word_limit: int, strict_length: bool = False) -> tuple[bool, str, int]:
     combined_text = " ".join(normalize_report_value(v) for v in report.values())
@@ -104,6 +107,9 @@ def validate_report_output(report: dict, lang: str, word_limit: int, strict_leng
         if section_length < section_min:
             return False, f"{key} 欄位內容過短", count_output_length(combined_text, lang)
     length = count_output_length(combined_text, lang)
+    total_min = min_total_length(word_limit)
+    if length < total_min:
+        return False, f"總字數過短（{length}/{total_min}）", length
     if length > word_limit:
         if strict_length:
             return False, f"超過字數限制（{length}/{word_limit}）", length
@@ -431,6 +437,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
 
                     pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                     generation_limit = max(1, int(word_limit))
+                    target_min = min_total_length(generation_limit)
                     budget_hint = format_budget_hint(build_length_budget(generation_limit))
                     section_min = min_section_length(word_limit)
                     
@@ -490,7 +497,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Override: {mechanism_override}
                     
                     # CONSTRAINTS
-                    - Goal Max Limit: {generation_limit} non-space characters
+                    - Goal Range: {target_min}~{generation_limit} non-space characters (target this range, do not be brief)
                     - Section Limits: {budget_hint} (Min. {section_min} / section, >=2 sentences)
                     - Track Labs: Pick from [{pdf_tests}]. MUST INCLUDE: {tracking_override}
                     
@@ -520,6 +527,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             if output_length > word_limit:
                                 shrink_by = max(10, output_length - word_limit)
                                 generation_limit = max(1, generation_limit - shrink_by)
+                            target_min = min_total_length(generation_limit)
                             budget_hint = format_budget_hint(build_length_budget(generation_limit))
                             section_min = min_section_length(word_limit)
                             system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
@@ -527,9 +535,10 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             core_prompt_retry = f"""
                             # RETRY - REDUCE LENGTH & OBEY CONSTRAINTS
                             - Item: {item}
-                            - Limits: {generation_limit} MAX chars, budgets: {budget_hint}, min {section_min}/section.
+                            - Limits: {target_min}~{generation_limit} chars, budgets: {budget_hint}, min {section_min}/section.
                             - Lang: {lang}
                             - Target Gene: {manual_gene} | Override: {mechanism_override}
+                            - If previous response was too short, expand each section with more clinical detail.
                             - Must use valid JSON format.
                             """
                             full_combined_prompt = f"{system_prompt}\n\n{core_prompt}\n{core_prompt_retry}"
