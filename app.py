@@ -520,10 +520,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     full_combined_prompt = f"{system_prompt}\n\n{core_prompt}"
                     
                     report = None
+                    best_short_report = None
+                    best_short_length = 0
                     failure_reason = ""
                     output_length = 0
                     for attempt in range(3):
-                        if attempt == 1:
+                        if attempt > 0:
                             if output_length > word_limit:
                                 shrink_by = max(10, output_length - word_limit)
                                 generation_limit = max(1, generation_limit - shrink_by)
@@ -545,7 +547,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             full_combined_prompt += (
                                 f"\n\n# RETRY NOTICE\n"
                                 f"The previous response was invalid: {failure_reason}.\n"
-                                f"Please respond again strictly in {lang} and within the target limit.\n"
+                                f"Please respond again strictly in {lang} and within the target range.\n"
                             )
                         response = client.models.generate_content(
                             model="models/gemma-3-27b-it",
@@ -566,6 +568,15 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                         if valid:
                             report = candidate_report
                             break
+                        if failure_reason.startswith("總字數過短") and output_length > best_short_length:
+                            best_short_report = candidate_report
+                            best_short_length = output_length
+
+                    if report is None and best_short_report is not None:
+                        report = best_short_report
+                        output_length = best_short_length
+                        failure_reason = f"未達目標字數下限，已採用最佳結果（{best_short_length}/{word_limit}）"
+                        st.warning(f"第 {index+1} 項未達目標字數，已採用最佳可用結果。")
 
                     if report:
                         report, adjusted_length = enforce_report_length(report, word_limit, lang)
