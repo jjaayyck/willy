@@ -20,6 +20,7 @@ from sheet_utils import (
 load_dotenv()
 
 def build_language_system_rule(lang: str, word_limit: int) -> str:
+    unit_desc = "words" if lang == "English" else "characters (non-space)"
     return f"""
 # LANGUAGE CONSTRAINT — ABSOLUTE RULE (HIGHEST PRIORITY)
 
@@ -27,7 +28,7 @@ The user has selected the output language: {lang}
 
 You MUST write the ENTIRE response strictly in this language.
 Any violation makes the response INVALID.
-You MUST keep the total output within {word_limit} characters (non-space) for the JSON values.
+You MUST keep the total output within {word_limit} {unit_desc} for the JSON values.
 
 - If lang is "English":
   - Respond in English ONLY
@@ -58,21 +59,45 @@ def is_language_valid(text: str, lang: str) -> bool:
     return True
 
 def count_output_length(text: str, lang: str) -> int:
+    if lang == "English":
+        return len(re.findall(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?", text))
     return len(re.findall(r"\S", text))
 
-def truncate_to_non_space_limit(text: str, limit: int) -> str:
+def truncate_to_limit(text: str, limit: int, lang: str) -> str:
     if limit <= 0:
         return ""
+    if lang == "English":
+        tokens = re.split(r"(\s+)", str(text))
+        kept = []
+        word_count = 0
+        truncated = False
+        for token in tokens:
+            if not token:
+                continue
+            token_words = len(re.findall(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?", token))
+            if token_words == 0:
+                kept.append(token)
+                continue
+            if word_count + token_words > limit:
+                truncated = True
+                break
+            kept.append(token)
+            word_count += token_words
+        result = "".join(kept).strip()
+        return result + "…" if result and truncated else result
+
     non_space_count = 0
     chars = []
+    was_truncated = False
     for ch in str(text):
         if not ch.isspace():
             non_space_count += 1
             if non_space_count > limit:
+                was_truncated = True
                 break
         chars.append(ch)
-    truncated = "".join(chars).strip()
-    return truncated + "…" if truncated and non_space_count > limit else truncated
+    result = "".join(chars).strip()
+    return result + "…" if result and was_truncated else result
 
 def normalize_report_value(value) -> str:
     if value is None:
@@ -121,7 +146,7 @@ def enforce_report_length(report: dict, word_limit: int, lang: str) -> tuple[dic
     adjusted = {}
     for key in ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]:
         section_text = normalize_report_value(report.get(key))
-        adjusted[key] = truncate_to_non_space_limit(section_text, budget[key]).strip()
+        adjusted[key] = truncate_to_limit(section_text, budget[key], lang).strip()
     total_length = count_output_length(" ".join(adjusted.values()), lang)
     return adjusted, total_length
 
@@ -438,6 +463,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
                     generation_limit = max(1, int(word_limit))
                     target_min = min_total_length(generation_limit)
+                    length_unit = "words" if lang == "English" else "non-space characters"
                     budget_hint = format_budget_hint(build_length_budget(generation_limit))
                     section_min = min_section_length(word_limit)
                     
@@ -497,7 +523,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     - Override: {mechanism_override}
                     
                     # CONSTRAINTS
-                    - Goal Range: {target_min}~{generation_limit} non-space characters (target this range, do not be brief)
+                    - Goal Range: {target_min}~{generation_limit} {length_unit} (target this range, do not be brief)
                     - Section Limits: {budget_hint} (Min. {section_min} / section, >=2 sentences)
                     - Track Labs: Pick from [{pdf_tests}]. MUST INCLUDE: {tracking_override}
                     
@@ -537,7 +563,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                             core_prompt_retry = f"""
                             # RETRY - REDUCE LENGTH & OBEY CONSTRAINTS
                             - Item: {item}
-                            - Limits: {target_min}~{generation_limit} chars, budgets: {budget_hint}, min {section_min}/section.
+                            - Limits: {target_min}~{generation_limit} {length_unit}, budgets: {budget_hint}, min {section_min}/section.
                             - Lang: {lang}
                             - Target Gene: {manual_gene} | Override: {mechanism_override}
                             - If previous response was too short, expand each section with more clinical detail.
