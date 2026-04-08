@@ -475,7 +475,19 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     "細胞炎症調控": "【強制追蹤項目】：必須建議追蹤 CRP, HsCRP, WBC。",
                 }
 
+                # 生活策略主軸（降低跨項重複）
+                TOPIC_LIFESTYLE_FOCUS = {
+                    "肌少症預防": "阻力訓練、漸進超負荷、蛋白質分配",
+                    "骨骼退化預防": "負重運動、日照、平衡訓練",
+                    "糖尿病預防": "餐後步行、醣類分配、阻力+有氧週期化",
+                    "脂質代謝能力": "中高強度有氧、精製糖控管、Omega-3食物策略",
+                    "心肌梗塞": "心肺耐力訓練、血壓管理、低鈉高鉀飲食",
+                    "中風": "血管彈性運動、睡眠規律、低鹽地中海型飲食",
+                    "睡眠修復與節律": "固定睡眠窗、晨間光照、晚間藍光管理",
+                }
+
                 # 核心：將 AI 呼叫移入迴圈內，確保每一項都分析到
+                previous_lifestyle_snippets = []
                 for index, item in enumerate(items):
                     st.write(f"正在分析第 {index+1}/{len(items)} 項：{item}...")
                     
@@ -529,6 +541,8 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     # 機制防呆注入
                     mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
                     tracking_override = TRACKING_TESTS_MAPPING.get(item, "")
+                    lifestyle_focus = TOPIC_LIFESTYLE_FOCUS.get(item, "請依主題機制提供該主題特異性的生活策略")
+                    prior_lifestyle_context = " | ".join(previous_lifestyle_snippets[-3:]) if previous_lifestyle_snippets else "None"
                     dual_report_lifestyle_rule = (
                         "Because two Excel reports were uploaded for the same client, increase lifestyle strategy depth: "
                         "provide tighter numeric targets, weekly plans, and progression milestones."
@@ -562,6 +576,8 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     2. PROHIBITED: Vague fluff (meditation, relax, stress focus) OR avoidance of irrelevant passive risks (second-hand smoke/pollution, unless they actually smoke).
                     3. Ensure tips combat {item} mechanisms specifically. Do NOT contradict metrics across tips (e.g. pick ONE water target).
                     4. {dual_report_lifestyle_rule}
+                    5. Topic-specific focus for this item: {lifestyle_focus}
+                    6. Avoid repeating prior lifestyle strategy patterns from earlier items: {prior_lifestyle_context}
 
                     Please output ONLY valid JSON format:
                     {{
@@ -647,6 +663,9 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                         with live_result_container:
                             st.markdown(f"### ✅ 第 {index+1}/{len(items)} 項完成：{item}")
                             st.text(section)
+                        lifestyle_text = normalize_report_value(report.get("lifestyle")).strip()
+                        if lifestyle_text:
+                            previous_lifestyle_snippets.append(lifestyle_text[:180])
                         if output_length > word_limit:
                             st.info(
                                 f"第 {index+1} 項原始字數 {output_length} 超過限制 {word_limit}，"
