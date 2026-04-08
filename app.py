@@ -273,9 +273,10 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", value=api_key_val)
     lang = st.selectbox("輸出語言", ["繁體中文", "English", "日本語", "한국어", "Tiếng Việt"], index=0)
     word_limit = st.number_input("每個項目的字數限制", value=800)
+    request_interval_sec = st.number_input("每項建議間隔秒數（避免觸及 RPM）", min_value=5, max_value=120, value=25)
 
 # 【修改點 1】：移除提示詞上傳區，僅保留 Excel 上傳
-up_excel = st.file_uploader("上傳檢測 Excel 檔案", type=["xlsx"])
+up_excels = st.file_uploader("上傳檢測 Excel 檔案（可一次上傳 1~2 份，同一位客戶）", type=["xlsx"], accept_multiple_files=True)
 
 # 固定設定：Google Sheet 與提示詞檔
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JDaap1KOnKn4ZefISp27edfW1nWJyf4EFWWrd4dxVdU/edit?resourcekey=&gid=1866179831#gid=1866179831"
@@ -283,7 +284,7 @@ GOOGLE_SHEET_WORKSHEET = ""
 GOOGLE_SHEET_GID = 1866179831
 PROMPT_FILE_NAME = "系統提示詞_v3.1_純文字.txt"
 
-if st.button("🚀 開始分析報告") and up_excel and api_key:
+if st.button("🚀 開始分析報告") and up_excels and api_key:
     # 檢查提示詞檔案是否存在
     if not os.path.exists(PROMPT_FILE_NAME):
         st.error(f"❌ 找不到設定檔：{PROMPT_FILE_NAME}。請確認檔案已上傳至 GitHub。")
@@ -296,14 +297,35 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 bg_prompt = f.read()
         
             with st.spinner("正在逐項分析中，請稍候..."):
-                user_info, items, mode = extract_data_from_upload(up_excel)
+                selected_excels = up_excels[:2]
+                if len(up_excels) > 2:
+                    st.warning("一次最多分析 2 份 Excel，系統將使用前 2 份檔案。")
 
-                # 解析申請單編號（檔名格式不符時給出警告，繼續執行）
-                try:
-                    application_id = parse_application_id(up_excel.name)
-                except ValueError as e:
-                    application_id = ""
-                    st.warning(f"⚠️ 無法從檔名解析申請單編號：{e}（病史將顯示為未提供）")
+                user_info = {}
+                items = []
+                seen_items = set()
+                mode_set = set()
+                application_ids = []
+
+                for idx, excel_file in enumerate(selected_excels):
+                    excel_file.seek(0)
+                    file_user_info, file_items, file_mode = extract_data_from_upload(excel_file)
+                    if idx == 0:
+                        user_info = file_user_info
+                    mode_set.add(file_mode)
+                    for it in file_items:
+                        if it not in seen_items:
+                            seen_items.add(it)
+                            items.append(it)
+                    try:
+                        application_ids.append(parse_application_id(excel_file.name))
+                    except ValueError as e:
+                        st.warning(f"⚠️ 檔案 {excel_file.name} 無法解析申請單編號：{e}")
+
+                mode = " + ".join(sorted(mode_set)) if mode_set else "未偵測"
+                application_id = application_ids[0] if application_ids else ""
+                if len(set(application_ids)) > 1:
+                    st.warning("⚠️ 兩份 Excel 的申請單編號不同，系統將以第一份檔案為主查詢病史。")
 
                 # 從 Google Sheet 讀取資料
                 records = load_records_from_google_sheet(GOOGLE_SHEET_URL, GOOGLE_SHEET_WORKSHEET or None, GOOGLE_SHEET_GID)
@@ -344,7 +366,8 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 drinking_status = drinking_status or ""
                 betel_nut_status = betel_nut_status or ""
                 has_family_history = bool(family_history)
-                st.caption(f"檔名：{up_excel.name}｜申請單編號：{application_id or '（無法解析）'}")
+                file_names = "、".join(x.name for x in selected_excels)
+                st.caption(f"檔名：{file_names}｜申請單編號：{application_id or '（無法解析）'}")
                 st.caption(f"Google Sheet：{GOOGLE_SHEET_URL}")
                 habit_display_parts = []
                 if smoking_status:
@@ -365,6 +388,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                 final_text = ""
                 progress_bar = st.progress(0)
                 live_result_container = st.container()
+                is_dual_report = len(selected_excels) == 2
                 HEADERS = {
                     "繁體中文": {
                         "intro": "您的檢測結果【{item}】預防評分為低分。",
@@ -505,6 +529,12 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     # 機制防呆注入
                     mechanism_override = TOPIC_MECHANISM_RULES.get(item, "")
                     tracking_override = TRACKING_TESTS_MAPPING.get(item, "")
+                    dual_report_lifestyle_rule = (
+                        "Because two Excel reports were uploaded for the same client, increase lifestyle strategy depth: "
+                        "provide tighter numeric targets, weekly plans, and progression milestones."
+                        if is_dual_report else
+                        "Provide standard lifestyle strategy depth."
+                    )
 
                     core_prompt = f"""
                     # CRITICAL REQUIREMENTS
@@ -531,6 +561,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     1. 4-6 highly detailed, strictly quantifiable proactive tips ("30 min aerobic 130bpm 3x/week", "sleep 7-8 hrs 11PM-7AM").
                     2. PROHIBITED: Vague fluff (meditation, relax, stress focus) OR avoidance of irrelevant passive risks (second-hand smoke/pollution, unless they actually smoke).
                     3. Ensure tips combat {item} mechanisms specifically. Do NOT contradict metrics across tips (e.g. pick ONE water target).
+                    4. {dual_report_lifestyle_rule}
 
                     Please output ONLY valid JSON format:
                     {{
@@ -626,7 +657,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                     
                     progress_bar.progress((index + 1) / len(items))
                     if len(items) > 1:
-                        time.sleep(15) # 避免頻率限制
+                        time.sleep(int(request_interval_sec)) # 避免頻率限制
 
                 st.success("🎉 分析完成！")
                 st.text_area("結果預覽", final_text, height=400)
