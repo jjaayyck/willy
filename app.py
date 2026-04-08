@@ -576,7 +576,7 @@ if st.button("🚀 開始分析報告") and up_excel and api_key:
                                 f"Please respond again strictly in {lang} and within the target range.\n"
                             )
                         response = client.models.generate_content(
-                            model="models/gemma-3-27b-it",
+                            model="models/gemma-4-31b-it",
                             contents=full_combined_prompt,
                             config={
                                 "temperature": 0.3,
