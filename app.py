@@ -4,6 +4,7 @@ import openpyxl
 import json
 import re
 import time
+from datetime import datetime, timezone
 import gspread
 from google import genai
 from dotenv import load_dotenv
@@ -262,6 +263,107 @@ def format_output(content):
         return "\n".join(lines)
     return str(content).strip()
 
+def build_item_section(item: str, headers: dict, report: dict) -> str:
+    section = headers["intro"].format(item=item) + "\n\n"
+    section += f'{headers["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
+    section += f'{headers["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
+    section += f'{headers["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
+    section += f'{headers["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
+    section += f'{headers["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
+    return section
+
+def build_item_json_payload(item: str, headers: dict, report: dict, section_text: str) -> dict:
+    maintenance_text = format_output(report.get("maintenance"))
+    tracking_text = format_output(report.get("tracking"))
+    nutrition_text = format_output(report.get("nutrition"))
+    supplements_text = format_output(report.get("supplements"))
+    lifestyle_text = format_output(report.get("lifestyle"))
+    return {
+        "topic": item,
+        "machine": {
+            "maintenance": maintenance_text,
+            "tracking": tracking_text,
+            "nutrition": nutrition_text,
+            "supplements": supplements_text,
+            "lifestyle": lifestyle_text,
+        },
+        "display": {
+            "intro": headers["intro"].format(item=item),
+            "titles": {
+                "maintenance": headers["maintenance"],
+                "tracking": headers["tracking"],
+                "nutrition": headers["nutrition"],
+                "supplements": headers["supplements"],
+                "lifestyle": headers["lifestyle"],
+            },
+            "rendered_text": section_text.strip(),
+        },
+    }
+
+def build_report_json_schema() -> dict:
+    section_fields = {
+        "maintenance": {"type": "string"},
+        "tracking": {"type": "string"},
+        "nutrition": {"type": "string"},
+        "supplements": {"type": "string"},
+        "lifestyle": {"type": "string"},
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://willy.local/schemas/analysis-report.v1.json",
+        "title": "Analysis Report Export v1",
+        "type": "object",
+        "required": ["schema_version", "meta", "reports"],
+        "properties": {
+            "schema_version": {"type": "string", "const": "analysis_report.v1"},
+            "meta": {
+                "type": "object",
+                "required": ["language", "mode", "application_id", "generated_at", "report_count"],
+                "properties": {
+                    "language": {"type": "string"},
+                    "mode": {"type": "string"},
+                    "application_id": {"type": "string"},
+                    "generated_at": {"type": "string", "format": "date-time"},
+                    "report_count": {"type": "integer", "minimum": 0},
+                },
+                "additionalProperties": False,
+            },
+            "reports": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["topic", "machine", "display"],
+                    "properties": {
+                        "topic": {"type": "string"},
+                        "machine": {
+                            "type": "object",
+                            "required": list(section_fields.keys()),
+                            "properties": section_fields,
+                            "additionalProperties": False,
+                        },
+                        "display": {
+                            "type": "object",
+                            "required": ["intro", "titles", "rendered_text"],
+                            "properties": {
+                                "intro": {"type": "string"},
+                                "titles": {
+                                    "type": "object",
+                                    "required": list(section_fields.keys()),
+                                    "properties": section_fields,
+                                    "additionalProperties": False,
+                                },
+                                "rendered_text": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "additionalProperties": False,
+    }
+
 # --- 3. Streamlit 網頁介面 ---
 st.set_page_config(page_title="AI 營養報告生成器", layout="wide")
 st.title("🧬 印度AI 細胞解碼報告生成器")
@@ -386,6 +488,7 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
                 
                 final_text = ""
+                final_json_reports = []
                 progress_bar = st.progress(0)
                 live_result_container = st.container()
                 is_dual_report = len(selected_excels) == 2
@@ -653,13 +756,9 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
 
                     if report:
                         report, adjusted_length = enforce_report_length(report, word_limit, lang)
-                        section = H["intro"].format(item=item) + "\n\n"
-                        section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
-                        section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
-                        section += f'{H["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
-                        section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
-                        section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
+                        section = build_item_section(item, H, report)
                         final_text += section + "="*50 + "\n\n"
+                        final_json_reports.append(build_item_json_payload(item, H, report, section))
                         with live_result_container:
                             st.markdown(f"### ✅ 第 {index+1}/{len(items)} 項完成：{item}")
                             st.text(section)
@@ -681,6 +780,31 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                 st.success("🎉 分析完成！")
                 st.text_area("結果預覽", final_text, height=400)
                 st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
+                final_json_payload = {
+                    "schema_version": "analysis_report.v1",
+                    "meta": {
+                        "language": lang,
+                        "mode": mode,
+                        "application_id": application_id or "",
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "report_count": len(final_json_reports),
+                    },
+                    "reports": final_json_reports,
+                }
+                final_json_text = json.dumps(final_json_payload, ensure_ascii=False, indent=2)
+                st.download_button(
+                    "📥 下載 JSON 報告",
+                    final_json_text,
+                    file_name="分析報告.json",
+                    mime="application/json",
+                )
+                schema_json_text = json.dumps(build_report_json_schema(), ensure_ascii=False, indent=2)
+                st.download_button(
+                    "📥 下載 JSON Schema",
+                    schema_json_text,
+                    file_name="分析報告.schema.json",
+                    mime="application/json",
+                )
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
