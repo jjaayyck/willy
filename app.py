@@ -4,6 +4,7 @@ import openpyxl
 import json
 import re
 import time
+from datetime import datetime, timezone
 import gspread
 from google import genai
 from dotenv import load_dotenv
@@ -28,7 +29,7 @@ The user has selected the output language: {lang}
 
 You MUST write the ENTIRE response strictly in this language.
 Any violation makes the response INVALID.
-You MUST keep the total output within {word_limit} {unit_desc} for the JSON values.
+You MUST keep the total output AT LEAST {word_limit} {unit_desc} for the JSON values.
 
 - If lang is "English":
   - Respond in English ONLY
@@ -135,20 +136,31 @@ def validate_report_output(report: dict, lang: str, word_limit: int, strict_leng
     total_min = min_total_length(word_limit)
     if length < total_min:
         return False, f"總字數過短（{length}/{total_min}）", length
-    if length > word_limit:
-        if strict_length:
-            return False, f"超過字數限制（{length}/{word_limit}）", length
-        return True, f"超過字數限制（{length}/{word_limit}），將自動壓縮", length
     return True, "", length
 
-def enforce_report_length(report: dict, word_limit: int, lang: str) -> tuple[dict, int]:
-    budget = build_length_budget(word_limit)
-    adjusted = {}
-    for key in ["maintenance", "tracking", "nutrition", "supplements", "lifestyle"]:
-        section_text = normalize_report_value(report.get(key))
-        adjusted[key] = truncate_to_limit(section_text, budget[key], lang).strip()
-    total_length = count_output_length(" ".join(adjusted.values()), lang)
-    return adjusted, total_length
+def enforce_list_format(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    lines = [ln.strip() for ln in re.split(r"\r?\n+", value) if ln.strip()]
+    if len(lines) <= 1:
+        parts = [p.strip() for p in re.split(r"[。；;]", value) if p.strip()]
+        if len(parts) > 1:
+            lines = parts
+    cleaned = []
+    for line in lines:
+        line = re.sub(r"^\s*(?:[-•●‧·]|\d+[.)、])\s*", "", line).strip()
+        if line:
+            cleaned.append(line)
+    if not cleaned:
+        return value
+    return "\n".join(f"{idx}. {entry}" for idx, entry in enumerate(cleaned, start=1))
+
+def normalize_report_lists(report: dict) -> dict:
+    normalized = dict(report)
+    normalized["tracking"] = enforce_list_format(normalize_report_value(report.get("tracking")))
+    normalized["nutrition"] = enforce_list_format(normalize_report_value(report.get("nutrition")))
+    return normalized
 
 def build_length_budget(word_limit: int) -> dict:
     weights = {
@@ -171,11 +183,11 @@ def build_length_budget(word_limit: int) -> dict:
 
 def format_budget_hint(budget: dict) -> str:
     return (
-        f'maintenance≤{budget["maintenance"]}, '
-        f'tracking≤{budget["tracking"]}, '
-        f'nutrition≤{budget["nutrition"]}, '
-        f'supplements≤{budget["supplements"]}, '
-        f'lifestyle≤{budget["lifestyle"]}'
+        f'maintenance≈{budget["maintenance"]}, '
+        f'tracking≈{budget["tracking"]}, '
+        f'nutrition≈{budget["nutrition"]}, '
+        f'supplements≈{budget["supplements"]}, '
+        f'lifestyle≈{budget["lifestyle"]}'
     )
 
 
@@ -261,6 +273,107 @@ def format_output(content):
                 lines.append(f"{idx}. {entry}")
         return "\n".join(lines)
     return str(content).strip()
+
+def build_item_section(item: str, headers: dict, report: dict) -> str:
+    section = headers["intro"].format(item=item) + "\n\n"
+    section += f'{headers["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
+    section += f'{headers["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
+    section += f'{headers["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
+    section += f'{headers["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
+    section += f'{headers["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
+    return section
+
+def build_item_json_payload(item: str, headers: dict, report: dict, section_text: str) -> dict:
+    maintenance_text = format_output(report.get("maintenance"))
+    tracking_text = format_output(report.get("tracking"))
+    nutrition_text = format_output(report.get("nutrition"))
+    supplements_text = format_output(report.get("supplements"))
+    lifestyle_text = format_output(report.get("lifestyle"))
+    return {
+        "topic": item,
+        "machine": {
+            "maintenance": maintenance_text,
+            "tracking": tracking_text,
+            "nutrition": nutrition_text,
+            "supplements": supplements_text,
+            "lifestyle": lifestyle_text,
+        },
+        "display": {
+            "intro": headers["intro"].format(item=item),
+            "titles": {
+                "maintenance": headers["maintenance"],
+                "tracking": headers["tracking"],
+                "nutrition": headers["nutrition"],
+                "supplements": headers["supplements"],
+                "lifestyle": headers["lifestyle"],
+            },
+            "rendered_text": section_text.strip(),
+        },
+    }
+
+def build_report_json_schema() -> dict:
+    section_fields = {
+        "maintenance": {"type": "string"},
+        "tracking": {"type": "string"},
+        "nutrition": {"type": "string"},
+        "supplements": {"type": "string"},
+        "lifestyle": {"type": "string"},
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://willy.local/schemas/analysis-report.v1.json",
+        "title": "Analysis Report Export v1",
+        "type": "object",
+        "required": ["schema_version", "meta", "reports"],
+        "properties": {
+            "schema_version": {"type": "string", "const": "analysis_report.v1"},
+            "meta": {
+                "type": "object",
+                "required": ["language", "mode", "application_id", "generated_at", "report_count"],
+                "properties": {
+                    "language": {"type": "string"},
+                    "mode": {"type": "string"},
+                    "application_id": {"type": "string"},
+                    "generated_at": {"type": "string", "format": "date-time"},
+                    "report_count": {"type": "integer", "minimum": 0},
+                },
+                "additionalProperties": False,
+            },
+            "reports": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["topic", "machine", "display"],
+                    "properties": {
+                        "topic": {"type": "string"},
+                        "machine": {
+                            "type": "object",
+                            "required": list(section_fields.keys()),
+                            "properties": section_fields,
+                            "additionalProperties": False,
+                        },
+                        "display": {
+                            "type": "object",
+                            "required": ["intro", "titles", "rendered_text"],
+                            "properties": {
+                                "intro": {"type": "string"},
+                                "titles": {
+                                    "type": "object",
+                                    "required": list(section_fields.keys()),
+                                    "properties": section_fields,
+                                    "additionalProperties": False,
+                                },
+                                "rendered_text": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "additionalProperties": False,
+    }
 
 # --- 3. Streamlit 網頁介面 ---
 st.set_page_config(page_title="AI 營養報告生成器", layout="wide")
@@ -386,6 +499,7 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     st.info(f"偵測模式：{mode} | 項目總數：{len(items)}")
                 
                 final_text = ""
+                final_json_reports = []
                 progress_bar = st.progress(0)
                 live_result_container = st.container()
                 is_dual_report = len(selected_excels) == 2
@@ -497,10 +611,10 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     gene_instruction_en = f"The primary gene for this topic MUST be: {manual_gene}." if manual_gene else "Select the correct gene based on the mapping table in the system prompt."
 
                     pdf_tests = "RBC, Hgb, Hct, MCV, MCH, MCHC, Platelet, WBC, Neutrophil, Lymphocyte, Monocyte, Eosinophil, Basophil, Cholesterol, HDL-Cho, LDL-Cho, Triglyceride, Glucose(Fasting/2hrPC), HbA1c, T-Bilirubin, D-Bilirubin, Total Protein, Albumin, Globulin, sGOT, sGPT, Alk-P, r-GTP, BUN, Creatinine, UA, eGFR, AFP, CEA, CA-199, CA-125, CA-153, PSA, CA-724, NSE, cyfra 21-1, SCC, LDH, CPK, HsCRP, Homocysteine, T4, T3, TSH, Free T4, Na, K, Cl, Ca, Phosphorus, EBVCA-IgA, RA, CRP, H. Pylori Ab"
-                    generation_limit = max(1, int(word_limit))
-                    target_min = min_total_length(generation_limit)
+                    minimum_length = max(1, int(word_limit))
+                    target_min = min_total_length(minimum_length)
                     length_unit = "words" if lang == "English" else "non-space characters"
-                    budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                    budget_hint = format_budget_hint(build_length_budget(minimum_length))
                     section_min = min_section_length(word_limit)
                     
                     family_history_instruction_zh = (
@@ -567,9 +681,10 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     - Override: {mechanism_override}
                     
                     # CONSTRAINTS
-                    - Goal Range: {target_min}~{generation_limit} {length_unit} (target this range, do not be brief)
+                    - Minimum Length: at least {minimum_length} {length_unit} (do not be brief)
                     - Section Limits: {budget_hint} (Min. {section_min} / section, >=2 sentences)
                     - Track Labs: Pick from [{pdf_tests}]. MUST INCLUDE: {tracking_override}
+                    - "tracking" and "nutrition" MUST be formatted as numbered bullet lists (1., 2., 3....), each with concrete measurable details.
                     
                     # LIFESTYLE RULES
                     1. 4-6 highly detailed, strictly quantifiable proactive tips ("30 min aerobic 130bpm 3x/week", "sleep 7-8 hrs 11PM-7AM").
@@ -589,7 +704,7 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     }}
                     """
 
-                    system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
+                    system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, minimum_length)
                     full_combined_prompt = f"{system_prompt}\n\n{core_prompt}"
                     
                     report = None
@@ -599,21 +714,19 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                     output_length = 0
                     for attempt in range(3):
                         if attempt > 0:
-                            if output_length > word_limit:
-                                shrink_by = max(10, output_length - word_limit)
-                                generation_limit = max(1, generation_limit - shrink_by)
-                            target_min = min_total_length(generation_limit)
-                            budget_hint = format_budget_hint(build_length_budget(generation_limit))
+                            target_min = min_total_length(minimum_length)
+                            budget_hint = format_budget_hint(build_length_budget(minimum_length))
                             section_min = min_section_length(word_limit)
-                            system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, generation_limit)
+                            system_prompt = bg_prompt + "\n\n" + build_language_system_rule(lang, minimum_length)
                             
                             core_prompt_retry = f"""
-                            # RETRY - REDUCE LENGTH & OBEY CONSTRAINTS
+                            # RETRY - EXPAND DETAIL & OBEY CONSTRAINTS
                             - Item: {item}
-                            - Limits: {target_min}~{generation_limit} {length_unit}, budgets: {budget_hint}, min {section_min}/section.
+                            - Minimum length: at least {minimum_length} {length_unit}; budgets: {budget_hint}; min {section_min}/section.
                             - Lang: {lang}
                             - Target Gene: {manual_gene} | Override: {mechanism_override}
                             - If previous response was too short, expand each section with more clinical detail.
+                            - "tracking" and "nutrition" must be numbered bullet lists with 4+ items.
                             - Must use valid JSON format.
                             """
                             full_combined_prompt = f"{system_prompt}\n\n{core_prompt}\n{core_prompt_retry}"
@@ -636,7 +749,7 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                             failure_reason = "未回傳有效 JSON"
                             continue
 
-                        candidate_report = json.loads(json_match.group(0))
+                        candidate_report = normalize_report_lists(json.loads(json_match.group(0)))
                         valid, failure_reason, output_length = validate_report_output(candidate_report, lang, word_limit, strict_length=False)
                         if valid:
                             report = candidate_report
@@ -652,25 +765,15 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                         st.warning(f"第 {index+1} 項未達目標字數，已採用最佳可用結果。")
 
                     if report:
-                        report, adjusted_length = enforce_report_length(report, word_limit, lang)
-                        section = H["intro"].format(item=item) + "\n\n"
-                        section += f'{H["maintenance"]}\n{format_output(report.get("maintenance"))}\n\n'
-                        section += f'{H["tracking"]}\n{format_output(report.get("tracking"))}\n\n'
-                        section += f'{H["nutrition"]}\n{format_output(report.get("nutrition"))}\n\n'
-                        section += f'{H["supplements"]}\n{format_output(report.get("supplements"))}\n\n'
-                        section += f'{H["lifestyle"]}\n{format_output(report.get("lifestyle"))}\n\n'
+                        section = build_item_section(item, H, report)
                         final_text += section + "="*50 + "\n\n"
+                        final_json_reports.append(build_item_json_payload(item, H, report, section))
                         with live_result_container:
                             st.markdown(f"### ✅ 第 {index+1}/{len(items)} 項完成：{item}")
                             st.text(section)
                         lifestyle_text = normalize_report_value(report.get("lifestyle")).strip()
                         if lifestyle_text:
                             previous_lifestyle_snippets.append(lifestyle_text[:180])
-                        if output_length > word_limit:
-                            st.info(
-                                f"第 {index+1} 項原始字數 {output_length} 超過限制 {word_limit}，"
-                                f"已自動壓縮至約 {adjusted_length} 字。"
-                            )
                     else:
                         st.warning(f"第 {index+1} 項分析失敗：{failure_reason}")
                     
@@ -681,6 +784,31 @@ if st.button("🚀 開始分析報告") and up_excels and api_key:
                 st.success("🎉 分析完成！")
                 st.text_area("結果預覽", final_text, height=400)
                 st.download_button("📥 下載報告", final_text, file_name="分析報告.txt")
+                final_json_payload = {
+                    "schema_version": "analysis_report.v1",
+                    "meta": {
+                        "language": lang,
+                        "mode": mode,
+                        "application_id": application_id or "",
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "report_count": len(final_json_reports),
+                    },
+                    "reports": final_json_reports,
+                }
+                final_json_text = json.dumps(final_json_payload, ensure_ascii=False, indent=2)
+                st.download_button(
+                    "📥 下載 JSON 報告",
+                    final_json_text,
+                    file_name="分析報告.json",
+                    mime="application/json",
+                )
+                schema_json_text = json.dumps(build_report_json_schema(), ensure_ascii=False, indent=2)
+                st.download_button(
+                    "📥 下載 JSON Schema",
+                    schema_json_text,
+                    file_name="分析報告.schema.json",
+                    mime="application/json",
+                )
 
         except Exception as e:
             st.error(f"分析失敗：{e}")
